@@ -1,5 +1,5 @@
 import { ActivityIndicator, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme as NavigationDarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Icon } from 'react-native-paper';
@@ -12,12 +12,26 @@ import SettingsScreen from '../screens/SettingsScreen';
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
+const navTheme = {
+  ...NavigationDarkTheme,
+  colors: {
+    ...NavigationDarkTheme.colors,
+    background: '#090D1A',
+    card: '#12182C',
+    text: '#ECF1FF',
+    border: '#1A2340',
+    primary: '#9D7CFF',
+  },
+};
+
 function HomeTabs() {
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { height: 66, paddingTop: 8, backgroundColor: '#12182C', borderTopWidth: 0 },
+        tabBarStyle: { height: 66, paddingBottom: 8, paddingTop: 8, backgroundColor: '#12182C', borderTopWidth: 0 },
+        tabBarActiveTintColor: '#9D7CFF',
+        tabBarInactiveTintColor: '#637099',
       }}
     >
       <Tab.Screen
@@ -39,19 +53,28 @@ export default function AppNavigator() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#090D1A' }}>
+        <ActivityIndicator color="#9D7CFF" />
       </View>
     );
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navTheme}>
       <Stack.Navigator>
         {user ? (
           <>
             <Stack.Screen name="Home" component={HomeTabs} options={{ headerShown: false }} />
-            <Stack.Screen name="ChatRoom" component={ChatRoomScreen} options={{ title: 'Chat' }} />
+            <Stack.Screen 
+              name="ChatRoom" 
+              component={ChatRoomScreen} 
+              options={{ 
+                title: 'Chat',
+                headerStyle: { backgroundColor: '#12182C' },
+                headerTintColor: '#ECF1FF',
+                headerShadowVisible: false,
+              }} 
+            />
           </>
         ) : (
           <Stack.Screen name="Auth" component={AuthScreen} options={{ headerShown: false }} />

@@ -1,16 +1,39 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { Avatar, Button, Card, Text, TextInput } from 'react-native-paper';
+import { Avatar, Button, Card, IconButton, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
-import { storage } from '../services/firebase';
+import { auth, storage } from '../services/firebase';
+
+const getBlobFromUri = async (uri) => {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = function () {
+      resolve(xhr.response);
+    };
+    xhr.onerror = function () {
+      reject(new TypeError("Network request failed"));
+    };
+    xhr.responseType = "blob";
+    xhr.open("GET", uri, true);
+    xhr.send(null);
+  });
+};
 
 export default function SettingsScreen() {
-  const { profile, logout, updateUserProfile } = useAuth();
-  const [username, setUsername] = useState(profile?.username || '');
-  const [photoURL, setPhotoURL] = useState(profile?.photoURL || '');
+  const { user, profile, logout, updateUserProfile } = useAuth();
+  const [username, setUsername] = useState('');
+  const [photoURL, setPhotoURL] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Synchronize state when the profile loads or updates
+  useEffect(() => {
+    if (profile) {
+      setUsername(profile.username || '');
+      setPhotoURL(profile.photoURL || '');
+    }
+  }, [profile]);
 
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -21,24 +44,42 @@ export default function SettingsScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
       quality: 0.8,
     });
 
     if (result.canceled) return;
 
-    const imageUri = result.assets[0].uri;
-    const blob = await (await fetch(imageUri)).blob();
-    const fileRef = ref(storage, `avatars/${profile.uid}-${Date.now()}.jpg`);
-    await uploadBytes(fileRef, blob, { contentType: 'image/jpeg' });
-    const url = await getDownloadURL(fileRef);
-    setPhotoURL(url);
+    setSaving(true);
+    try {
+      const imageUri = result.assets[0].uri;
+      const blob = await getBlobFromUri(imageUri);
+      
+      const userId = profile?.uid || auth.currentUser?.uid;
+      if (!userId) {
+        throw new Error("User credentials not found");
+      }
+
+      const fileRef = ref(storage, `avatars/${userId}-${Date.now()}.jpg`);
+      await uploadBytes(fileRef, blob, { contentType: 'image/jpeg' });
+      const url = await getDownloadURL(fileRef);
+      setPhotoURL(url);
+      Alert.alert('Success', 'Photo uploaded. Press "Save Profile" to apply changes.');
+    } catch (e) {
+      Alert.alert('Upload failed', e.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onSave = async () => {
+    if (!username.trim()) {
+      Alert.alert('Validation Error', 'Username cannot be empty.');
+      return;
+    }
     setSaving(true);
     try {
       await updateUserProfile({ username: username.trim(), photoURL });
+      Alert.alert('Success', 'Profile updated successfully.');
     } catch (e) {
       Alert.alert('Save failed', e.message);
     } finally {
@@ -50,17 +91,85 @@ export default function SettingsScreen() {
     <View style={styles.container}>
       <Card style={styles.card}>
         <Card.Content style={styles.content}>
-          {photoURL ? (
-            <Avatar.Image source={{ uri: photoURL }} size={90} />
-          ) : (
-            <Avatar.Text label={(username || profile?.email || '?').slice(0, 2).toUpperCase()} size={90} />
-          )}
-          <Button mode="outlined" onPress={pickImage}>Choose profile image</Button>
-          <TextInput label="Username" value={username} onChangeText={setUsername} />
-          <TextInput label="Profile image URL" value={photoURL} onChangeText={setPhotoURL} autoCapitalize="none" />
-          <Text variant="bodySmall">Email: {profile?.email}</Text>
-          <Button mode="contained" onPress={onSave} loading={saving} disabled={saving}>Save profile</Button>
-          <Button mode="text" onPress={logout}>Log out</Button>
+          <View style={styles.avatarSection}>
+            <View style={styles.avatarWrapper}>
+              {photoURL ? (
+                <Avatar.Image source={{ uri: photoURL }} size={100} style={styles.avatarShadow} />
+              ) : (
+                <Avatar.Text 
+                  label={(username || profile?.email || user?.email || '?').slice(0, 2).toUpperCase()} 
+                  size={100} 
+                  style={styles.avatarBg}
+                  labelStyle={styles.avatarLabel}
+                />
+              )}
+              <IconButton 
+                icon="camera" 
+                mode="contained" 
+                size={20} 
+                style={styles.cameraIcon} 
+                containerColor="#9D7CFF" 
+                iconColor="#090D1A" 
+                onPress={pickImage} 
+                disabled={saving}
+              />
+            </View>
+            <Button mode="text" onPress={pickImage} textColor="#9D7CFF" style={styles.changePicBtn} disabled={saving}>
+              Change Photo
+            </Button>
+          </View>
+
+          <View style={styles.emailContainer}>
+            <Text style={styles.emailLabel}>Registered Email</Text>
+            <Text style={styles.emailValue}>{profile?.email || user?.email || 'N/A'}</Text>
+          </View>
+
+          <TextInput 
+            label="Username" 
+            value={username} 
+            onChangeText={setUsername} 
+            mode="outlined"
+            style={styles.input}
+            outlineColor="#3C4770"
+            activeOutlineColor="#9D7CFF"
+            textColor="#ECF1FF"
+            disabled={saving}
+          />
+
+          <TextInput 
+            label="Profile Image URL (Optional)" 
+            value={photoURL} 
+            onChangeText={setPhotoURL} 
+            mode="outlined"
+            style={styles.input}
+            outlineColor="#3C4770"
+            activeOutlineColor="#9D7CFF"
+            textColor="#ECF1FF"
+            autoCapitalize="none"
+            disabled={saving}
+          />
+
+          <Button 
+            mode="contained" 
+            onPress={onSave} 
+            loading={saving} 
+            disabled={saving} 
+            style={styles.saveBtn}
+            labelStyle={styles.btnLabel}
+          >
+            Save Profile
+          </Button>
+
+          <Button 
+            mode="outlined" 
+            onPress={logout} 
+            style={styles.logoutBtn} 
+            textColor="#FF6B6B"
+            outlineColor="#FF6B6B"
+            disabled={saving}
+          >
+            Log Out
+          </Button>
         </Card.Content>
       </Card>
     </View>
@@ -70,12 +179,84 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
+    padding: 20,
+    backgroundColor: '#090D1A',
+    justifyContent: 'center',
   },
   card: {
-    borderRadius: 16,
+    borderRadius: 24,
+    backgroundColor: '#12182C',
+    borderWidth: 1,
+    borderColor: '#1A2340',
   },
   content: {
-    gap: 12,
+    gap: 16,
+    paddingVertical: 8,
+  },
+  avatarSection: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  avatarWrapper: {
+    position: 'relative',
+  },
+  avatarShadow: {
+    elevation: 4,
+  },
+  avatarBg: {
+    backgroundColor: '#1A2340',
+  },
+  avatarLabel: {
+    color: '#9D7CFF',
+    fontWeight: 'bold',
+    fontSize: 36,
+  },
+  cameraIcon: {
+    position: 'absolute',
+    bottom: -6,
+    right: -6,
+    margin: 0,
+  },
+  changePicBtn: {
+    marginTop: 4,
+  },
+  emailContainer: {
+    backgroundColor: '#090D1A',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#1A2340',
+  },
+  emailLabel: {
+    color: '#637099',
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  emailValue: {
+    color: '#ECF1FF',
+    fontSize: 15,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  input: {
+    backgroundColor: '#12182C',
+  },
+  saveBtn: {
+    borderRadius: 12,
+    paddingVertical: 4,
+    marginTop: 8,
+    backgroundColor: '#9D7CFF',
+  },
+  btnLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  logoutBtn: {
+    borderRadius: 12,
+    paddingVertical: 4,
+    borderColor: '#FF6B6B',
   },
 });

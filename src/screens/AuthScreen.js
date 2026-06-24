@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { Button, Card, HelperText, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 
@@ -30,18 +30,61 @@ export default function AuthScreen() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
       <View style={styles.content}>
-        <Text variant="displaySmall" style={styles.title}>zol chat</Text>
-        <Text variant="bodyMedium" style={styles.subtitle}>Beautiful and private conversations.</Text>
+        <View style={styles.header}>
+          <Image source={require('../../assets/zol-logo.png')} style={styles.logo} />
+          <Text variant="headlineLarge" style={styles.title}>zol chat</Text>
+          <Text variant="bodyLarge" style={styles.subtitle}>Beautiful and private conversations.</Text>
+        </View>
 
         <Card style={styles.card}>
-          <Card.Content>
-            <TextInput label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-            <TextInput label="Password" value={password} onChangeText={setPassword} secureTextEntry style={styles.input} />
-            <HelperText type="error" visible={Boolean(error)}>{error}</HelperText>
-            <Button mode="contained" onPress={onSubmit} loading={submitting} disabled={submitting || !email || !password}>
+          <Card.Content style={styles.cardContent}>
+            <TextInput
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              mode="outlined"
+              style={styles.input}
+              outlineColor="#3C4770"
+              activeOutlineColor="#9D7CFF"
+              textColor="#ECF1FF"
+            />
+            <TextInput
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              mode="outlined"
+              style={styles.input}
+              outlineColor="#3C4770"
+              activeOutlineColor="#9D7CFF"
+              textColor="#ECF1FF"
+            />
+            {Boolean(error) && (
+              <HelperText type="error" visible={Boolean(error)} style={styles.errorText}>
+                {error}
+              </HelperText>
+            )}
+            <Button
+              mode="contained"
+              onPress={onSubmit}
+              loading={submitting}
+              disabled={submitting || !email || !password}
+              style={styles.button}
+              labelStyle={styles.buttonLabel}
+            >
               {isSignUp ? 'Create account' : 'Login'}
             </Button>
-            <Button mode="text" onPress={() => setIsSignUp((prev) => !prev)} style={styles.switchButton}>
+            <Button
+              mode="text"
+              onPress={() => {
+                setIsSignUp((prev) => !prev);
+                setError('');
+              }}
+              style={styles.switchButton}
+              textColor="#637099"
+            >
               {isSignUp ? 'Already have an account? Login' : 'Need an account? Sign up'}
             </Button>
           </Card.Content>
@@ -55,23 +98,58 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
+    backgroundColor: '#090D1A',
   },
   content: {
-    gap: 14,
+    gap: 24,
+  },
+  header: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  logo: {
+    width: 80,
+    height: 80,
+    resizeMode: 'contain',
+    marginBottom: 8,
   },
   title: {
-    fontWeight: '700',
+    fontWeight: '800',
+    color: '#ECF1FF',
+    letterSpacing: 1.5,
   },
   subtitle: {
-    opacity: 0.8,
+    color: '#637099',
+    textAlign: 'center',
   },
   card: {
-    borderRadius: 20,
+    borderRadius: 24,
+    backgroundColor: '#12182C',
+    borderWidth: 1,
+    borderColor: '#1A2340',
+  },
+  cardContent: {
+    paddingVertical: 12,
+    gap: 4,
   },
   input: {
-    marginTop: 10,
+    backgroundColor: '#12182C',
     marginBottom: 8,
+  },
+  errorText: {
+    marginBottom: 8,
+    paddingHorizontal: 0,
+  },
+  button: {
+    borderRadius: 12,
+    paddingVertical: 4,
+    marginTop: 8,
+    backgroundColor: '#9D7CFF',
+  },
+  buttonLabel: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   switchButton: {
     marginTop: 8,

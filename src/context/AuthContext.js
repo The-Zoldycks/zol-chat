@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -6,7 +6,7 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 
 const AuthContext = createContext();
@@ -17,6 +17,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isNewUser, setIsNewUser] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
@@ -47,7 +48,8 @@ export function AuthProvider({ children }) {
     return unsubscribe;
   }, []);
 
-  const register = async ({ email, password }) => {
+  const register = useCallback(async ({ email, password }) => {
+    setIsNewUser(true);
     const response = await createUserWithEmailAndPassword(auth, email, password);
     const username = makeDefaultUsername(email);
     await updateProfile(response.user, { displayName: username });
@@ -58,26 +60,27 @@ export function AuthProvider({ children }) {
       photoURL: '',
       createdAt: serverTimestamp(),
     });
-  };
+  }, []);
 
-  const login = ({ email, password }) => signInWithEmailAndPassword(auth, email, password);
+  const login = useCallback(({ email, password }) => signInWithEmailAndPassword(auth, email, password), []);
 
-  const logout = () => signOut(auth);
+  const logout = useCallback(() => signOut(auth), []);
 
-  const updateUserProfile = async ({ username, photoURL }) => {
-    if (!user) return;
+  const updateUserProfile = useCallback(async ({ username, photoURL }) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
     const updates = {
       username: username || profile?.username || '',
       photoURL: photoURL || profile?.photoURL || '',
     };
-    await updateProfile(user, { displayName: updates.username, photoURL: updates.photoURL });
-    await updateDoc(doc(db, 'users', user.uid), updates);
+    await updateProfile(currentUser, { displayName: updates.username, photoURL: updates.photoURL });
+    await setDoc(doc(db, 'users', currentUser.uid), updates, { merge: true });
     setProfile((current) => ({ ...current, ...updates }));
-  };
+  }, [profile]);
 
   const value = useMemo(
-    () => ({ user, profile, loading, register, login, logout, updateUserProfile }),
-    [user, profile, loading],
+    () => ({ user, profile, loading, register, login, logout, updateUserProfile, isNewUser, setIsNewUser }),
+    [user, profile, loading, register, login, logout, updateUserProfile, isNewUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
