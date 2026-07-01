@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet, View, KeyboardAvoidingView, Platform } from 'react-native';
 import { Avatar, IconButton, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 import { sendMessage, subscribeToMessages } from '../services/chatService';
@@ -26,7 +26,9 @@ export default function ChatRoomScreen({ route, navigation }) {
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitleContainer}>
-          {target?.photoURL ? (
+          {target?.uid === 'zolbot' ? (
+            <Avatar.Image source={require('../../assets/zolbot.jpg')} size={34} />
+          ) : target?.photoURL ? (
             <Avatar.Image source={{ uri: target.photoURL }} size={34} />
           ) : (
             <Avatar.Text 
@@ -56,7 +58,11 @@ export default function ChatRoomScreen({ route, navigation }) {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
       <FlatList
         ref={listRef}
         style={styles.list}
@@ -100,7 +106,7 @@ export default function ChatRoomScreen({ route, navigation }) {
           size={24}
         />
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

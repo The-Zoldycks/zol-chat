@@ -43,18 +43,35 @@ export default function ChatsScreen({ navigation }) {
     navigation.navigate('ChatRoom', { chatId, target });
   };
 
-  const items = useMemo(
-    () =>
-      chats.map((chat) => {
-        const partnerId = chat.participants.find((participantId) => participantId !== user.uid);
-        const partner = chat.participantMeta?.[partnerId] || {};
-        return {
-          ...chat,
-          partner,
-        };
-      }),
-    [chats, user.uid],
-  );
+  const items = useMemo(() => {
+    const chatItems = chats.map((chat) => {
+      const partnerId = chat.participants.find((participantId) => participantId !== user?.uid);
+      const partner = chat.participantMeta?.[partnerId] || {};
+      return {
+        ...chat,
+        partner,
+      };
+    });
+
+    const hasZolbot = chatItems.some((item) => item.partner.uid === 'zolbot');
+    if (!hasZolbot && user?.uid) {
+      chatItems.unshift({
+        id: `zolbot__${user.uid}`,
+        participants: [user.uid, 'zolbot'],
+        partner: {
+          uid: 'zolbot',
+          username: 'Zolbot',
+          email: 'zolbot@zoldyck.ai',
+          photoURL: '',
+          isBot: true,
+        },
+        lastMessage: 'Hi! I am Zolbot. Ask me anything! 🤖',
+        updatedAt: null,
+      });
+    }
+
+    return chatItems;
+  }, [chats, user?.uid]);
 
   return (
     <View style={styles.container}>
@@ -77,7 +94,9 @@ export default function ChatsScreen({ navigation }) {
               descriptionStyle={styles.chatDescription}
               left={() => (
                 <View style={styles.avatarContainer}>
-                  {item.partner.photoURL ? (
+                  {item.partner.uid === 'zolbot' ? (
+                    <Avatar.Image source={require('../../assets/zolbot.jpg')} size={48} />
+                  ) : item.partner.photoURL ? (
                     <Avatar.Image source={{ uri: item.partner.photoURL }} size={48} />
                   ) : (
                     <Avatar.Text 
