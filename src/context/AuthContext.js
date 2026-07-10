@@ -11,7 +11,7 @@ import { auth, db } from '../services/firebase';
 
 const AuthContext = createContext();
 
-const makeDefaultUsername = (email = '') => email.split('@')[0] || `user_${Date.now()}`;
+const makeDefaultUsername = (email = '') => (email || `user_${Date.now()}`).split('@')[0];
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -49,7 +49,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   const register = useCallback(async ({ email, password }) => {
-    setIsNewUser(true);
     const response = await createUserWithEmailAndPassword(auth, email, password);
     const username = makeDefaultUsername(email);
     await updateProfile(response.user, { displayName: username });
@@ -60,6 +59,7 @@ export function AuthProvider({ children }) {
       photoURL: '',
       createdAt: serverTimestamp(),
     });
+    setIsNewUser(true);
   }, []);
 
   const login = useCallback(({ email, password }) => signInWithEmailAndPassword(auth, email, password), []);

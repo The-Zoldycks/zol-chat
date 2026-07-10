@@ -66,7 +66,7 @@ export default function ChatsScreen({ navigation }) {
           isBot: true,
         },
         lastMessage: 'Hi! I am Zolbot. Ask me anything! 🤖',
-        updatedAt: null,
+        updatedAt: new Date(0),
       });
     }
 

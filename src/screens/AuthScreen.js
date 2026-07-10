@@ -21,7 +21,7 @@ export default function AuthScreen() {
         await login({ email: email.trim().toLowerCase(), password });
       }
     } catch (e) {
-      setError(e.message.replace('Firebase: ', ''));
+      setError(e.message.replace(/^Firebase:\s*/, ''));
     } finally {
       setSubmitting(false);
     }

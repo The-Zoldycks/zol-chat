@@ -38,9 +38,9 @@ export default function ChatRoomScreen({ route, navigation }) {
               labelStyle={styles.headerAvatarText}
             />
           )}
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerName}>{target?.username || target?.email}</Text>
-            <Text style={styles.headerEmail} numberOfLines={1}>{target?.email}</Text>
+<View style={styles.headerTextContainer}>
+            <Text style={styles.headerName}>{target?.username || target?.email || 'Unknown'}</Text>
+            <Text style={styles.headerEmail} numberOfLines={1}>{target?.email || ''}</Text>
           </View>
         </View>
       ),
@@ -187,8 +187,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     fontWeight: '300',
   },
-  mineTime: {
-    color: '#E0D4FF',
+mineTime: {
+    color: '#FFFFFF',
   },
   theirsTime: {
     color: '#637099',

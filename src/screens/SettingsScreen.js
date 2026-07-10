@@ -4,21 +4,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { Avatar, Button, Card, IconButton, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
-import { auth, storage } from '../services/firebase';
+import { storage } from '../services/firebase';
 
 const getBlobFromUri = async (uri) => {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.onload = function () {
-      resolve(xhr.response);
-    };
-    xhr.onerror = function () {
-      reject(new TypeError("Network request failed"));
-    };
-    xhr.responseType = "blob";
-    xhr.open("GET", uri, true);
-    xhr.send(null);
-  });
+  const response = await fetch(uri);
+  return response.blob();
 };
 
 export default function SettingsScreen() {
@@ -54,9 +44,9 @@ export default function SettingsScreen() {
       const imageUri = result.assets[0].uri;
       const blob = await getBlobFromUri(imageUri);
       
-      const userId = profile?.uid || auth.currentUser?.uid;
+      const userId = user?.uid;
       if (!userId) {
-        throw new Error("User credentials not found");
+        throw new Error("User not authenticated");
       }
 
       const fileRef = ref(storage, `avatars/${userId}-${Date.now()}.jpg`);
