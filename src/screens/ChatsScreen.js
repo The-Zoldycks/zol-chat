@@ -4,6 +4,7 @@ import { Avatar, FAB, List, Portal, Searchbar, Surface, Text } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { findUsersByEmailOrUsername, startOrOpenChat, subscribeToChats } from '../services/chatService';
+import { colors } from '../theme/theme';
 
 export default function ChatsScreen({ navigation }) {
   const { user, profile, isNewUser, setIsNewUser } = useAuth();
@@ -39,6 +40,8 @@ export default function ChatsScreen({ navigation }) {
     try {
       const found = await findUsersByEmailOrUsername(value, user.uid);
       setResults(found);
+    } catch {
+      setResults([]);
     } finally {
       setSearching(false);
     }
@@ -81,7 +84,7 @@ export default function ChatsScreen({ navigation }) {
           isBot: true,
         },
         lastMessage: 'Hi! I am Zolbot. Ask me anything! 🤖',
-        updatedAt: new Date(0),
+        updatedAt: new Date(Date.now() - 86400000),
       });
     }
 
@@ -139,9 +142,9 @@ export default function ChatsScreen({ navigation }) {
                 value={searchTerm} 
                 onChangeText={runSearch} 
                 style={styles.search} 
-                placeholderTextColor="#637099"
-                iconColor="#637099"
-                textColor="#ECF1FF"
+                placeholderTextColor={colors.muted}
+                iconColor={colors.muted}
+                textColor={colors.onSurface}
                 loading={searching}
               />
               <FlatList
@@ -180,7 +183,7 @@ export default function ChatsScreen({ navigation }) {
                 style={styles.closeFab} 
                 onPress={closeComposer} 
                 size="small" 
-                color="#ECF1FF"
+                color={colors.onSurface}
               />
             </Surface>
           </View>
@@ -190,7 +193,7 @@ export default function ChatsScreen({ navigation }) {
       <FAB 
         icon="plus" 
         style={[styles.fab, { bottom: Math.max(insets.bottom + 16, 20) }]} 
-        color="#090D1A" 
+        color={colors.background} 
         onPress={() => setShowComposer(true)} 
       />
     </View>
@@ -200,23 +203,23 @@ export default function ChatsScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090D1A',
+    backgroundColor: colors.background,
   },
   listContainer: {
     paddingVertical: 8,
   },
   chatItemContainer: {
     borderBottomWidth: 1,
-    borderBottomColor: '#12182C',
+    borderBottomColor: colors.surface,
     paddingVertical: 4,
   },
   chatTitle: {
-    color: '#ECF1FF',
+    color: colors.onSurface,
     fontWeight: '600',
     fontSize: 16,
   },
   chatDescription: {
-    color: '#637099',
+    color: colors.muted,
     fontSize: 13,
     marginTop: 2,
   },
@@ -226,10 +229,10 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
   },
   avatarTextBg: {
-    backgroundColor: '#1A2340',
+    backgroundColor: colors.surfaceVariant,
   },
   avatarLabel: {
-    color: '#9D7CFF',
+    color: colors.primary,
     fontWeight: '600',
   },
   emptyContainer: {
@@ -240,7 +243,7 @@ const styles = StyleSheet.create({
   },
   empty: {
     textAlign: 'center',
-    color: '#637099',
+    color: colors.muted,
     fontSize: 15,
     paddingHorizontal: 40,
     lineHeight: 22,
@@ -249,7 +252,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 20,
     bottom: 20,
-    backgroundColor: '#9D7CFF',
+    backgroundColor: colors.primary,
     borderRadius: 16,
   },
   backdrop: {
@@ -266,35 +269,35 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     padding: 20,
     gap: 16,
-    backgroundColor: '#12182C',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1A2340',
+    borderColor: colors.surfaceVariant,
     borderBottomWidth: 0,
   },
   composerTitle: {
-    color: '#ECF1FF',
+    color: colors.onSurface,
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 4,
   },
   search: {
     borderRadius: 14,
-    backgroundColor: '#090D1A',
+    backgroundColor: colors.background,
   },
   searchResultsList: {
     marginTop: 4,
   },
   searchItemContainer: {
     borderBottomWidth: 1,
-    borderBottomColor: '#1A2340',
+    borderBottomColor: colors.surfaceVariant,
     paddingVertical: 2,
   },
   searchResultTitle: {
-    color: '#ECF1FF',
+    color: colors.onSurface,
     fontWeight: '600',
   },
   searchResultDesc: {
-    color: '#637099',
+    color: colors.muted,
   },
   searchAvatarContainer: {
     justifyContent: 'center',
@@ -303,11 +306,11 @@ const styles = StyleSheet.create({
   emptySmall: {
     textAlign: 'center',
     marginTop: 16,
-    color: '#637099',
+    color: colors.muted,
   },
   closeFab: {
     alignSelf: 'center',
     marginTop: 8,
-    backgroundColor: '#1A2340',
+    backgroundColor: colors.surfaceVariant,
   },
 });

@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
+import { colors } from '../theme/theme';
 import AuthScreen from '../screens/AuthScreen';
 import ChatsScreen from '../screens/ChatsScreen';
 import ChatRoomScreen from '../screens/ChatRoomScreen';
@@ -17,11 +18,11 @@ const navTheme = {
   ...NavigationDarkTheme,
   colors: {
     ...NavigationDarkTheme.colors,
-    background: '#090D1A',
-    card: '#12182C',
-    text: '#ECF1FF',
-    border: '#1A2340',
-    primary: '#9D7CFF',
+    background: colors.background,
+    card: colors.surface,
+    text: colors.onSurface,
+    border: colors.surfaceVariant,
+    primary: colors.primary,
   },
 };
 
@@ -35,11 +36,11 @@ function HomeTabs() {
           height: 60 + insets.bottom, 
           paddingBottom: Math.max(insets.bottom, 6), 
           paddingTop: 6, 
-          backgroundColor: '#12182C', 
+          backgroundColor: colors.surface, 
           borderTopWidth: 0 
         },
-        tabBarActiveTintColor: '#9D7CFF',
-        tabBarInactiveTintColor: '#637099',
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.muted,
       }}
     >
       <Tab.Screen
@@ -61,8 +62,8 @@ export default function AppNavigator() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#090D1A' }}>
-        <ActivityIndicator color="#9D7CFF" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -78,8 +79,8 @@ export default function AppNavigator() {
               component={ChatRoomScreen} 
               options={{ 
                 title: 'Chat',
-                headerStyle: { backgroundColor: '#12182C' },
-                headerTintColor: '#ECF1FF',
+                headerStyle: { backgroundColor: colors.surface },
+                headerTintColor: colors.onSurface,
                 headerShadowVisible: false,
               }} 
             />

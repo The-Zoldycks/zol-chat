@@ -5,11 +5,22 @@ import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { sendMessage, subscribeToMessages } from '../services/chatService';
+import { colors } from '../theme/theme';
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
   try {
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp.seconds * 1000);
+    let date;
+    if (timestamp.toDate) {
+      date = timestamp.toDate();
+    } else if (timestamp.seconds != null) {
+      date = new Date(timestamp.seconds * 1000);
+    } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+      date = new Date(timestamp);
+    } else {
+      return '';
+    }
+    if (Number.isNaN(date.getTime())) return '';
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   } catch {
     return '';
@@ -71,8 +82,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         photoURL: profile?.photoURL || user?.photoURL || '',
       };
       await sendMessage(chatId, senderObj, messageText);
-    } catch (error) {
-      console.error('Failed to send message:', error);
+    } catch {
       Alert.alert('Error', 'Failed to send message. Please try again.');
     } finally {
       setSending(false);
@@ -82,7 +92,7 @@ export default function ChatRoomScreen({ route, navigation }) {
   return (
     <KeyboardAvoidingView 
       style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
     >
       <FlatList
@@ -111,11 +121,11 @@ export default function ChatRoomScreen({ route, navigation }) {
           onChangeText={setText} 
           mode="outlined" 
           placeholder="Message..." 
-          placeholderTextColor="#637099"
+          placeholderTextColor={colors.muted}
           style={styles.input} 
-          activeOutlineColor="#9D7CFF"
-          outlineColor="#1A2340"
-          textColor="#ECF1FF"
+          activeOutlineColor={colors.primary}
+          outlineColor={colors.surfaceVariant}
+          textColor={colors.onSurface}
           theme={{ roundness: 24 }}
           returnKeyType="send"
           onSubmitEditing={onSend}
@@ -126,8 +136,8 @@ export default function ChatRoomScreen({ route, navigation }) {
           mode="contained" 
           onPress={onSend} 
           disabled={!text.trim() || sending} 
-          containerColor="#9D7CFF"
-          iconColor="#090D1A"
+          containerColor={colors.primary}
+          iconColor={colors.background}
           size={24}
         />
       </View>
@@ -138,7 +148,7 @@ export default function ChatRoomScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090D1A',
+    backgroundColor: colors.background,
   },
   headerTitleContainer: {
     flexDirection: 'row',
@@ -147,22 +157,22 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   headerAvatarBg: {
-    backgroundColor: '#1A2340',
+    backgroundColor: colors.surfaceVariant,
   },
   headerAvatarText: {
-    color: '#9D7CFF',
+    color: colors.primary,
     fontWeight: 'bold',
   },
   headerTextContainer: {
     justifyContent: 'center',
   },
   headerName: {
-    color: '#ECF1FF',
+    color: colors.onSurface,
     fontWeight: '700',
     fontSize: 15,
   },
   headerEmail: {
-    color: '#637099',
+    color: colors.muted,
     fontSize: 11,
     maxWidth: 200,
   },
@@ -182,27 +192,27 @@ const styles = StyleSheet.create({
   },
   mine: {
     alignSelf: 'flex-end',
-    backgroundColor: '#9D7CFF',
+    backgroundColor: colors.primary,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 4,
   },
   mineText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 15,
     lineHeight: 20,
   },
   theirs: {
     alignSelf: 'flex-start',
-    backgroundColor: '#161D30',
+    backgroundColor: colors.chatTheirs,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 4,
     borderBottomRightRadius: 18,
   },
   theirsText: {
-    color: '#ECF1FF',
+    color: colors.onSurface,
     fontSize: 15,
     lineHeight: 20,
   },
@@ -212,24 +222,24 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     fontWeight: '300',
   },
-mineTime: {
-    color: '#FFFFFF',
+  mineTime: {
+    color: colors.white,
   },
   theirsTime: {
-    color: '#637099',
+    color: colors.muted,
   },
   composer: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
     gap: 8,
-    backgroundColor: '#12182C',
+    backgroundColor: colors.surface,
     borderTopWidth: 1,
-    borderTopColor: '#1A2340',
+    borderTopColor: colors.surfaceVariant,
   },
   input: {
     flex: 1,
-    backgroundColor: '#090D1A',
+    backgroundColor: colors.background,
     height: 48,
   },
 });

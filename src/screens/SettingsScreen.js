@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Avatar, Button, Card, IconButton, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 import { uploadToCloudinary } from '../services/cloudinaryService';
+import { colors } from '../theme/theme';
 
 export default function SettingsScreen() {
   const { user, profile, logout, updateUserProfile } = useAuth();
@@ -66,6 +67,17 @@ export default function SettingsScreen() {
     }
   };
 
+  const onLogout = () => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log Out', style: 'destructive', onPress: logout },
+      ],
+    );
+  };
+
   return (
     <View style={styles.container}>
       <Card style={styles.card}>
@@ -84,7 +96,7 @@ export default function SettingsScreen() {
               )}
               {uploading && (
                 <View style={styles.uploadingOverlay}>
-                  <ActivityIndicator size="small" color="#9D7CFF" />
+                  <ActivityIndicator size="small" color={colors.primary} />
                 </View>
               )}
               <IconButton 
@@ -92,13 +104,13 @@ export default function SettingsScreen() {
                 mode="contained" 
                 size={20} 
                 style={styles.cameraIcon} 
-                containerColor="#9D7CFF" 
-                iconColor="#090D1A" 
+                containerColor={colors.primary} 
+                iconColor={colors.background} 
                 onPress={pickImage} 
                 disabled={saving}
               />
             </View>
-            <Button mode="text" onPress={pickImage} textColor="#9D7CFF" style={styles.changePicBtn} disabled={saving}>
+            <Button mode="text" onPress={pickImage} textColor={colors.primary} style={styles.changePicBtn} disabled={saving}>
               {uploading ? 'Uploading...' : 'Change Photo'}
             </Button>
           </View>
@@ -114,9 +126,9 @@ export default function SettingsScreen() {
             onChangeText={setUsername} 
             mode="outlined"
             style={styles.input}
-            outlineColor="#3C4770"
-            activeOutlineColor="#9D7CFF"
-            textColor="#ECF1FF"
+            outlineColor={colors.outline}
+            activeOutlineColor={colors.primary}
+            textColor={colors.onSurface}
             disabled={saving}
           />
 
@@ -126,9 +138,9 @@ export default function SettingsScreen() {
             onChangeText={setPhotoURL} 
             mode="outlined"
             style={styles.input}
-            outlineColor="#3C4770"
-            activeOutlineColor="#9D7CFF"
-            textColor="#ECF1FF"
+            outlineColor={colors.outline}
+            activeOutlineColor={colors.primary}
+            textColor={colors.onSurface}
             autoCapitalize="none"
             disabled={saving}
           />
@@ -146,10 +158,10 @@ export default function SettingsScreen() {
 
           <Button 
             mode="outlined" 
-            onPress={logout} 
+            onPress={onLogout} 
             style={styles.logoutBtn} 
-            textColor="#FF6B6B"
-            outlineColor="#FF6B6B"
+            textColor={colors.danger}
+            outlineColor={colors.danger}
             disabled={saving}
           >
             Log Out
@@ -164,14 +176,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    backgroundColor: '#090D1A',
+    backgroundColor: colors.background,
     justifyContent: 'center',
   },
   card: {
     borderRadius: 24,
-    backgroundColor: '#12182C',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1A2340',
+    borderColor: colors.surfaceVariant,
   },
   content: {
     gap: 16,
@@ -196,10 +208,10 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   avatarBg: {
-    backgroundColor: '#1A2340',
+    backgroundColor: colors.surfaceVariant,
   },
   avatarLabel: {
-    color: '#9D7CFF',
+    color: colors.primary,
     fontWeight: 'bold',
     fontSize: 36,
   },
@@ -213,34 +225,34 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   emailContainer: {
-    backgroundColor: '#090D1A',
+    backgroundColor: colors.background,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#1A2340',
+    borderColor: colors.surfaceVariant,
   },
   emailLabel: {
-    color: '#637099',
+    color: colors.muted,
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   emailValue: {
-    color: '#ECF1FF',
+    color: colors.onSurface,
     fontSize: 15,
     marginTop: 2,
     fontWeight: '500',
   },
   input: {
-    backgroundColor: '#12182C',
+    backgroundColor: colors.surface,
   },
   saveBtn: {
     borderRadius: 12,
     paddingVertical: 4,
     marginTop: 8,
-    backgroundColor: '#9D7CFF',
+    backgroundColor: colors.primary,
   },
   btnLabel: {
     fontSize: 15,
@@ -249,6 +261,6 @@ const styles = StyleSheet.create({
   logoutBtn: {
     borderRadius: 12,
     paddingVertical: 4,
-    borderColor: '#FF6B6B',
+    borderColor: colors.danger,
   },
 });

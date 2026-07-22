@@ -1,0 +1,31 @@
+name: Deploy to Firebase
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Write Firebase service account key
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_ZOL_CHAT }}' > ${{ github.workspace }}/service-account.json
+
+      - name: Install Functions dependencies
+        run: cd functions && npm install
+
+      - name: Deploy to Firebase
+        run: |
+          npx firebase deploy --only firestore:rules,firestore:indexes,functions --project zol-chat
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/service-account.json
+
+      - name: Cleanup service account
+        if: always()
+        run: rm -f ${{ github.workspace }}/service-account.json

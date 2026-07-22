@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -18,6 +18,8 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isNewUser, setIsNewUser] = useState(false);
+  const profileRef = useRef(null);
+  profileRef.current = profile;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
@@ -33,9 +35,9 @@ export function AuthProvider({ children }) {
             username,
             photoURL: authUser.photoURL || '',
             createdAt: serverTimestamp(),
-          });
+          }, { merge: true });
           await updateProfile(authUser, { displayName: username });
-          setProfile({ uid: authUser.uid, email: authUser.email, username, photoURL: '' });
+          setProfile({ uid: authUser.uid, email: authUser.email, username, photoURL: authUser.photoURL || '' });
         } else {
           setProfile(profileSnap.data());
         }
@@ -52,13 +54,6 @@ export function AuthProvider({ children }) {
     const response = await createUserWithEmailAndPassword(auth, email, password);
     const username = makeDefaultUsername(email);
     await updateProfile(response.user, { displayName: username });
-    await setDoc(doc(db, 'users', response.user.uid), {
-      uid: response.user.uid,
-      email,
-      username,
-      photoURL: '',
-      createdAt: serverTimestamp(),
-    });
     setIsNewUser(true);
   }, []);
 
@@ -69,14 +64,15 @@ export function AuthProvider({ children }) {
   const updateUserProfile = useCallback(async ({ username, photoURL }) => {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
+    const current = profileRef.current;
     const updates = {
-      username: username || profile?.username || '',
-      photoURL: photoURL || profile?.photoURL || '',
+      username: username || current?.username || '',
+      photoURL: photoURL || current?.photoURL || '',
     };
     await updateProfile(currentUser, { displayName: updates.username, photoURL: updates.photoURL });
     await setDoc(doc(db, 'users', currentUser.uid), updates, { merge: true });
-    setProfile((current) => ({ ...current, ...updates }));
-  }, [profile]);
+    setProfile((prev) => ({ ...prev, ...updates }));
+  }, []);
 
   const value = useMemo(
     () => ({ user, profile, loading, register, login, logout, updateUserProfile, isNewUser, setIsNewUser }),

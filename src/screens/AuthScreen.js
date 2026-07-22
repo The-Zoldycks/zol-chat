@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { Button, Card, HelperText, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
+import { colors } from '../theme/theme';
 
 const formatAuthError = (err) => {
   if (!err) return '';
@@ -61,9 +62,9 @@ export default function AuthScreen() {
               returnKeyType="next"
               mode="outlined"
               style={styles.input}
-              outlineColor="#3C4770"
-              activeOutlineColor="#9D7CFF"
-              textColor="#ECF1FF"
+              outlineColor={colors.outline}
+              activeOutlineColor={colors.primary}
+              textColor={colors.onSurface}
             />
             <TextInput
               label="Password"
@@ -74,13 +75,13 @@ export default function AuthScreen() {
               onSubmitEditing={onSubmit}
               mode="outlined"
               style={styles.input}
-              outlineColor="#3C4770"
-              activeOutlineColor="#9D7CFF"
-              textColor="#ECF1FF"
+              outlineColor={colors.outline}
+              activeOutlineColor={colors.primary}
+              textColor={colors.onSurface}
               right={
                 <TextInput.Icon 
                   icon={showPassword ? 'eye-off' : 'eye'} 
-                  color="#637099" 
+                  color={colors.muted} 
                   onPress={() => setShowPassword((prev) => !prev)} 
                 />
               }
@@ -107,7 +108,7 @@ export default function AuthScreen() {
                 setError('');
               }}
               style={styles.switchButton}
-              textColor="#637099"
+              textColor={colors.muted}
             >
               {isSignUp ? 'Already have an account? Login' : 'Need an account? Sign up'}
             </Button>
@@ -123,7 +124,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#090D1A',
+    backgroundColor: colors.background,
   },
   content: {
     gap: 24,
@@ -140,25 +141,25 @@ const styles = StyleSheet.create({
   },
   title: {
     fontWeight: '800',
-    color: '#ECF1FF',
+    color: colors.onSurface,
     letterSpacing: 1.5,
   },
   subtitle: {
-    color: '#637099',
+    color: colors.muted,
     textAlign: 'center',
   },
   card: {
     borderRadius: 24,
-    backgroundColor: '#12182C',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1A2340',
+    borderColor: colors.surfaceVariant,
   },
   cardContent: {
     paddingVertical: 12,
     gap: 4,
   },
   input: {
-    backgroundColor: '#12182C',
+    backgroundColor: colors.surface,
     marginBottom: 8,
   },
   errorText: {
@@ -169,7 +170,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 4,
     marginTop: 8,
-    backgroundColor: '#9D7CFF',
+    backgroundColor: colors.primary,
   },
   buttonLabel: {
     fontSize: 15,
