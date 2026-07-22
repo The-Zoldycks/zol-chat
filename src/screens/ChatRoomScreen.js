@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View, KeyboardAvoidingView, Platform } from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { Avatar, IconButton, Text, TextInput } from 'react-native-paper';
+import { useHeaderHeight } from '@react-navigation/elements';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { sendMessage, subscribeToMessages } from '../services/chatService';
 
@@ -19,7 +21,10 @@ export default function ChatRoomScreen({ route, navigation }) {
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const listRef = useRef(null);
+  const headerHeight = useHeaderHeight();
+  const insets = useSafeAreaInsets();
 
   // Set the screen header options dynamically to display target user info in standard stack header
   useEffect(() => {
@@ -38,7 +43,7 @@ export default function ChatRoomScreen({ route, navigation }) {
               labelStyle={styles.headerAvatarText}
             />
           )}
-<View style={styles.headerTextContainer}>
+          <View style={styles.headerTextContainer}>
             <Text style={styles.headerName}>{target?.username || target?.email || 'Unknown'}</Text>
             <Text style={styles.headerEmail} numberOfLines={1}>{target?.email || ''}</Text>
           </View>
@@ -53,15 +58,32 @@ export default function ChatRoomScreen({ route, navigation }) {
   }, [chatId]);
 
   const onSend = async () => {
-    await sendMessage(chatId, profile, text);
+    const messageText = text.trim();
+    if (!messageText || sending) return;
+
     setText('');
+    setSending(true);
+    try {
+      const senderObj = {
+        uid: profile?.uid || user?.uid,
+        email: profile?.email || user?.email,
+        username: profile?.username || user?.displayName || (user?.email ? user.email.split('@')[0] : 'User'),
+        photoURL: profile?.photoURL || user?.photoURL || '',
+      };
+      await sendMessage(chatId, senderObj, messageText);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
     <KeyboardAvoidingView 
       style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
     >
       <FlatList
         ref={listRef}
@@ -71,7 +93,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         keyExtractor={(item) => item.id}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => {
-          const mine = item.senderId === user.uid;
+          const mine = item.senderId === (user?.uid || profile?.uid);
           return (
             <View style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
               <Text style={mine ? styles.mineText : styles.theirsText}>{item.text}</Text>
@@ -83,24 +105,27 @@ export default function ChatRoomScreen({ route, navigation }) {
         }}
       />
 
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <TextInput 
           value={text} 
           onChangeText={setText} 
           mode="outlined" 
-          placeholder="Message" 
+          placeholder="Message..." 
           placeholderTextColor="#637099"
           style={styles.input} 
           activeOutlineColor="#9D7CFF"
           outlineColor="#1A2340"
           textColor="#ECF1FF"
           theme={{ roundness: 24 }}
+          returnKeyType="send"
+          onSubmitEditing={onSend}
+          blurOnSubmit={false}
         />
         <IconButton 
           icon="send" 
           mode="contained" 
           onPress={onSend} 
-          disabled={!text.trim()} 
+          disabled={!text.trim() || sending} 
           containerColor="#9D7CFF"
           iconColor="#090D1A"
           size={24}

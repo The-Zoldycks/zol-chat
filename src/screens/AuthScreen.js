@@ -3,15 +3,29 @@ import { Image, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-n
 import { Button, Card, HelperText, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 
+const formatAuthError = (err) => {
+  if (!err) return '';
+  const message = err.message || String(err);
+  if (message.includes('auth/invalid-email')) return 'Please enter a valid email address.';
+  if (message.includes('auth/user-not-found') || message.includes('auth/wrong-password') || message.includes('auth/invalid-credential')) {
+    return 'Invalid email or password. Please try again.';
+  }
+  if (message.includes('auth/email-already-in-use')) return 'An account with this email already exists.';
+  if (message.includes('auth/weak-password')) return 'Password should be at least 6 characters long.';
+  return message.replace(/^Firebase:\s*/, '').replace(/\(auth\/.*\)\.?/, '').trim();
+};
+
 export default function AuthScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { login, register } = useAuth();
 
   const onSubmit = async () => {
+    if (!email.trim() || !password) return;
     setError('');
     setSubmitting(true);
     try {
@@ -21,7 +35,7 @@ export default function AuthScreen() {
         await login({ email: email.trim().toLowerCase(), password });
       }
     } catch (e) {
-      setError(e.message.replace(/^Firebase:\s*/, ''));
+      setError(formatAuthError(e));
     } finally {
       setSubmitting(false);
     }
@@ -44,6 +58,7 @@ export default function AuthScreen() {
               onChangeText={setEmail}
               autoCapitalize="none"
               keyboardType="email-address"
+              returnKeyType="next"
               mode="outlined"
               style={styles.input}
               outlineColor="#3C4770"
@@ -54,12 +69,21 @@ export default function AuthScreen() {
               label="Password"
               value={password}
               onChangeText={setPassword}
-              secureTextEntry
+              secureTextEntry={!showPassword}
+              returnKeyType="done"
+              onSubmitEditing={onSubmit}
               mode="outlined"
               style={styles.input}
               outlineColor="#3C4770"
               activeOutlineColor="#9D7CFF"
               textColor="#ECF1FF"
+              right={
+                <TextInput.Icon 
+                  icon={showPassword ? 'eye-off' : 'eye'} 
+                  color="#637099" 
+                  onPress={() => setShowPassword((prev) => !prev)} 
+                />
+              }
             />
             {Boolean(error) && (
               <HelperText type="error" visible={Boolean(error)} style={styles.errorText}>

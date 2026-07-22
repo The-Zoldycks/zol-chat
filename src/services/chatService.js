@@ -85,9 +85,12 @@ export function subscribeToMessages(chatId, onData) {
 }
 
 export async function sendMessage(chatId, sender, text) {
-
   const trimmed = text.trim();
   if (!trimmed) return;
+
+  const senderId = sender?.uid || 'user';
+  const senderEmail = sender?.email || '';
+  const senderUsername = sender?.username || sender?.displayName || senderEmail || 'User';
 
   // Make sure the chat room document exists in Firestore if it's Zolbot
   if (chatId.startsWith('zolbot__')) {
@@ -96,12 +99,12 @@ export async function sendMessage(chatId, sender, text) {
     if (!existing.exists()) {
       await setDoc(chatRef, {
         id: chatId,
-        participants: [sender.uid, 'zolbot'],
+        participants: [senderId, 'zolbot'],
         participantMeta: {
-          [sender.uid]: {
-            email: sender.email,
-            username: sender.username || sender.email,
-            photoURL: sender.photoURL || '',
+          [senderId]: {
+            email: senderEmail,
+            username: senderUsername,
+            photoURL: sender?.photoURL || '',
           },
           zolbot: {
             email: 'zolbot@zoldyck.ai',
@@ -119,9 +122,9 @@ export async function sendMessage(chatId, sender, text) {
 
   await addDoc(collection(db, 'chats', chatId, 'messages'), {
     text: trimmed,
-    senderId: sender.uid,
-    senderEmail: sender.email,
-    senderUsername: sender.username || sender.email,
+    senderId: senderId,
+    senderEmail: senderEmail,
+    senderUsername: senderUsername,
     createdAt: serverTimestamp(),
   });
 
@@ -132,7 +135,7 @@ export async function sendMessage(chatId, sender, text) {
 
   // If chat is with Zolbot, trigger the AI response in the background
   if (chatId.startsWith('zolbot__')) {
-    respondWithBot(chatId, sender);
+    respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername });
   }
 }
 
@@ -145,20 +148,25 @@ async function respondWithBot(chatId, userProfile) {
 
     const history = [];
     querySnapshot.forEach((docSnap) => {
-      history.push(docSnap.data());
+      const data = docSnap.data();
+      if (data && data.text) {
+        history.push(data);
+      }
     });
     // Sort chronologically
     history.reverse();
+
+    const username = userProfile?.username || userProfile?.email || 'User';
 
     // 2. Format history for Groq API
     const groqMessages = [
       {
         role: 'system',
         content: `You are Zolbot, a friendly and helpful AI chatbot integrated directly into the Zol Chat app.
-You are chatting with ${userProfile.username || 'user'}. 
+You are chatting with ${username}. 
 
 Here is some basic information about Zol Chat to help you answer questions:
-- What is Zol Chat: A real-time chat mobile application built using React Native, Expo, Firebase (Authentication, Firestore, Storage), and React Native Paper for premium UI design.
+- What is Zol Chat: A real-time chat mobile application built using React Native, Expo, Firebase (Authentication, Firestore, Cloudinary), and React Native Paper for premium UI design.
 - How to add chats: Tap the purple Floating Action Button (+) on the bottom right of the chats list, and search for other users by their email or username.
 - How to customize profile: Navigate to the Settings tab (gear icon on bottom navigation) to update your username or set a profile photo.
 - Theme: The app runs in a premium space-themed dark mode (featuring dark indigo backgrounds and purple/violet accents).
@@ -199,7 +207,8 @@ Keep your responses engaging, helpful, and concise (appropriate for a chat room 
     });
 
     if (!response.ok) {
-      throw new Error(`Groq API error: status ${response.status} ${response.statusText}`);
+      const errText = await response.text();
+      throw new Error(`Groq API status ${response.status}: ${errText}`);
     }
 
     const data = await response.json();
@@ -222,7 +231,7 @@ Keep your responses engaging, helpful, and concise (appropriate for a chat room 
   } catch (error) {
     console.error("Error generating Zolbot response:", error);
     await addDoc(collection(db, 'chats', chatId, 'messages'), {
-      text: "Oops, I ran into an error trying to connect to the brain! Please make sure your network and Groq configuration are correct.",
+      text: "Oops, I ran into an error trying to connect to my AI brain! Please check your network connection.",
       senderId: 'zolbot',
       senderEmail: 'zolbot@zoldyck.ai',
       senderUsername: 'Zolbot',

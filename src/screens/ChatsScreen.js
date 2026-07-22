@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { Avatar, FAB, List, Portal, Searchbar, Surface, Text } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { findUsersByEmailOrUsername, startOrOpenChat, subscribeToChats } from '../services/chatService';
 
@@ -10,6 +11,8 @@ export default function ChatsScreen({ navigation }) {
   const [showComposer, setShowComposer] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const insets = useSafeAreaInsets();
 
   // Redirect new users to Settings page to finish their profile setup
   useEffect(() => {
@@ -29,10 +32,16 @@ export default function ChatsScreen({ navigation }) {
     setSearchTerm(value);
     if (!value.trim()) {
       setResults([]);
+      setSearching(false);
       return;
     }
-    const found = await findUsersByEmailOrUsername(value, user.uid);
-    setResults(found);
+    setSearching(true);
+    try {
+      const found = await findUsersByEmailOrUsername(value, user.uid);
+      setResults(found);
+    } finally {
+      setSearching(false);
+    }
   };
 
   const openChatWithUser = async (target) => {
@@ -41,6 +50,12 @@ export default function ChatsScreen({ navigation }) {
     setSearchTerm('');
     setResults([]);
     navigation.navigate('ChatRoom', { chatId, target });
+  };
+
+  const closeComposer = () => {
+    setShowComposer(false);
+    setSearchTerm('');
+    setResults([]);
   };
 
   const items = useMemo(() => {
@@ -115,64 +130,69 @@ export default function ChatsScreen({ navigation }) {
 
       <Portal>
         {showComposer && (
-          <Surface style={styles.composer} elevation={4}>
-            <Text variant="titleMedium" style={styles.composerTitle}>Start new chat</Text>
-            <Searchbar 
-              placeholder="Search by email or username" 
-              value={searchTerm} 
-              onChangeText={runSearch} 
-              style={styles.search} 
-              placeholderTextColor="#637099"
-              iconColor="#637099"
-              textColor="#ECF1FF"
-            />
-            <FlatList
-              data={results}
-              keyExtractor={(item) => item.uid}
-              style={styles.searchResultsList}
-              ListEmptyComponent={searchTerm ? <Text style={styles.emptySmall}>No user found.</Text> : null}
-              renderItem={({ item }) => (
-                <View style={styles.searchItemContainer}>
-                  <List.Item
-                    title={item.username || item.email}
-                    description={item.email}
-                    onPress={() => openChatWithUser(item)}
-                    titleStyle={styles.searchResultTitle}
-                    descriptionStyle={styles.searchResultDesc}
-                    left={() => (
-                      <View style={styles.searchAvatarContainer}>
-                        {item.photoURL ? (
-                          <Avatar.Image source={{ uri: item.photoURL }} size={40} />
-                        ) : (
-                          <Avatar.Text 
-                            size={40} 
-                            label={(item.username || item.email || '?').slice(0, 2).toUpperCase()} 
-                            style={styles.avatarTextBg}
-                            labelStyle={styles.avatarLabel}
-                          />
-                        )}
-                      </View>
-                    )}
-                  />
-                </View>
-              )}
-            />
-            <FAB 
-              icon="close" 
-              style={styles.closeFab} 
-              onPress={() => {
-                setShowComposer(false);
-                setSearchTerm('');
-                setResults([]);
-              }} 
-              size="small" 
-              color="#ECF1FF"
-            />
-          </Surface>
+          <View style={StyleSheet.absoluteFill}>
+            <Pressable style={styles.backdrop} onPress={closeComposer} />
+            <Surface style={styles.composer} elevation={4}>
+              <Text variant="titleMedium" style={styles.composerTitle}>Start new chat</Text>
+              <Searchbar 
+                placeholder="Search by email or username" 
+                value={searchTerm} 
+                onChangeText={runSearch} 
+                style={styles.search} 
+                placeholderTextColor="#637099"
+                iconColor="#637099"
+                textColor="#ECF1FF"
+                loading={searching}
+              />
+              <FlatList
+                data={results}
+                keyExtractor={(item) => item.uid}
+                style={styles.searchResultsList}
+                ListEmptyComponent={searchTerm && !searching ? <Text style={styles.emptySmall}>No user found.</Text> : null}
+                renderItem={({ item }) => (
+                  <View style={styles.searchItemContainer}>
+                    <List.Item
+                      title={item.username || item.email}
+                      description={item.email}
+                      onPress={() => openChatWithUser(item)}
+                      titleStyle={styles.searchResultTitle}
+                      descriptionStyle={styles.searchResultDesc}
+                      left={() => (
+                        <View style={styles.searchAvatarContainer}>
+                          {item.photoURL ? (
+                            <Avatar.Image source={{ uri: item.photoURL }} size={40} />
+                          ) : (
+                            <Avatar.Text 
+                              size={40} 
+                              label={(item.username || item.email || '?').slice(0, 2).toUpperCase()} 
+                              style={styles.avatarTextBg}
+                              labelStyle={styles.avatarLabel}
+                            />
+                          )}
+                        </View>
+                      )}
+                    />
+                  </View>
+                )}
+              />
+              <FAB 
+                icon="close" 
+                style={styles.closeFab} 
+                onPress={closeComposer} 
+                size="small" 
+                color="#ECF1FF"
+              />
+            </Surface>
+          </View>
         )}
       </Portal>
 
-      <FAB icon="plus" style={styles.fab} color="#090D1A" onPress={() => setShowComposer(true)} />
+      <FAB 
+        icon="plus" 
+        style={[styles.fab, { bottom: Math.max(insets.bottom + 16, 20) }]} 
+        color="#090D1A" 
+        onPress={() => setShowComposer(true)} 
+      />
     </View>
   );
 }
@@ -231,6 +251,10 @@ const styles = StyleSheet.create({
     bottom: 20,
     backgroundColor: '#9D7CFF',
     borderRadius: 16,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(9, 13, 26, 0.6)',
   },
   composer: {
     position: 'absolute',

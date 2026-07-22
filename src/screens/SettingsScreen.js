@@ -1,21 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { Avatar, Button, Card, IconButton, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
-import { storage } from '../services/firebase';
-
-const getBlobFromUri = async (uri) => {
-  const response = await fetch(uri);
-  return response.blob();
-};
+import { uploadToCloudinary } from '../services/cloudinaryService';
 
 export default function SettingsScreen() {
   const { user, profile, logout, updateUserProfile } = useAuth();
   const [username, setUsername] = useState('');
   const [photoURL, setPhotoURL] = useState('');
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   // Synchronize state when the profile loads or updates
   useEffect(() => {
@@ -39,24 +34,18 @@ export default function SettingsScreen() {
 
     if (result.canceled) return;
 
+    setUploading(true);
     setSaving(true);
     try {
       const imageUri = result.assets[0].uri;
-      const blob = await getBlobFromUri(imageUri);
-      
-      const userId = user?.uid;
-      if (!userId) {
-        throw new Error("User not authenticated");
-      }
-
-      const fileRef = ref(storage, `avatars/${userId}-${Date.now()}.jpg`);
-      await uploadBytes(fileRef, blob, { contentType: 'image/jpeg' });
-      const url = await getDownloadURL(fileRef);
+      const url = await uploadToCloudinary(imageUri);
       setPhotoURL(url);
-      Alert.alert('Success', 'Photo uploaded. Press "Save Profile" to apply changes.');
+      await updateUserProfile({ username: username.trim() || profile?.username, photoURL: url });
+      Alert.alert('Success', 'Profile photo updated successfully!');
     } catch (e) {
       Alert.alert('Upload failed', e.message);
     } finally {
+      setUploading(false);
       setSaving(false);
     }
   };
@@ -93,6 +82,11 @@ export default function SettingsScreen() {
                   labelStyle={styles.avatarLabel}
                 />
               )}
+              {uploading && (
+                <View style={styles.uploadingOverlay}>
+                  <ActivityIndicator size="small" color="#9D7CFF" />
+                </View>
+              )}
               <IconButton 
                 icon="camera" 
                 mode="contained" 
@@ -105,7 +99,7 @@ export default function SettingsScreen() {
               />
             </View>
             <Button mode="text" onPress={pickImage} textColor="#9D7CFF" style={styles.changePicBtn} disabled={saving}>
-              Change Photo
+              {uploading ? 'Uploading...' : 'Change Photo'}
             </Button>
           </View>
 
@@ -189,6 +183,14 @@ const styles = StyleSheet.create({
   },
   avatarWrapper: {
     position: 'relative',
+  },
+  uploadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(9, 13, 26, 0.7)',
+    borderRadius: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
   },
   avatarShadow: {
     elevation: 4,

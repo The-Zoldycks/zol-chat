@@ -2,6 +2,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, DarkTheme as NavigationDarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 import AuthScreen from '../screens/AuthScreen';
@@ -25,11 +26,18 @@ const navTheme = {
 };
 
 function HomeTabs() {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { height: 66, paddingBottom: 8, paddingTop: 8, backgroundColor: '#12182C', borderTopWidth: 0 },
+        tabBarStyle: { 
+          height: 60 + insets.bottom, 
+          paddingBottom: Math.max(insets.bottom, 6), 
+          paddingTop: 6, 
+          backgroundColor: '#12182C', 
+          borderTopWidth: 0 
+        },
         tabBarActiveTintColor: '#9D7CFF',
         tabBarInactiveTintColor: '#637099',
       }}
