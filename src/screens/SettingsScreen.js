@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Avatar, Button, Card, IconButton, Switch, Text, TextInput } from 'react-native-paper';
@@ -9,6 +9,7 @@ import { uploadToCloudinary } from '../services/cloudinaryService';
 export default function SettingsScreen() {
   const { user, profile, logout, updateUserProfile } = useAuth();
   const { colors, isDark, toggleTheme } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [username, setUsername] = useState('');
   const [photoURL, setPhotoURL] = useState('');
   const [saving, setSaving] = useState(false);
@@ -181,18 +182,18 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c) => StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    backgroundColor: colors.background,
+    backgroundColor: c.background,
     justifyContent: 'center',
   },
   card: {
     borderRadius: 24,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.surfaceVariant,
+    borderColor: c.surfaceVariant,
   },
   content: {
     gap: 16,
@@ -217,10 +218,10 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   avatarBg: {
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
   },
   avatarLabel: {
-    color: colors.primary,
+    color: c.primary,
     fontWeight: 'bold',
     fontSize: 36,
   },
@@ -234,34 +235,34 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   emailContainer: {
-    backgroundColor: colors.background,
+    backgroundColor: c.background,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: colors.surfaceVariant,
+    borderColor: c.surfaceVariant,
   },
   emailLabel: {
-    color: colors.muted,
+    color: c.muted,
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   emailValue: {
-    color: colors.onSurface,
+    color: c.onSurface,
     fontSize: 15,
     marginTop: 2,
     fontWeight: '500',
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
   },
   saveBtn: {
     borderRadius: 12,
     paddingVertical: 4,
     marginTop: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: c.primary,
   },
   btnLabel: {
     fontSize: 15,

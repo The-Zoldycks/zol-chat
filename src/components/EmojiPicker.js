@@ -1,7 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { Searchbar, Text } from 'react-native-paper';
-import { colors } from '../theme/theme';
 
 const EMOJI_CATEGORIES = {
   'Smileys': ['😀','😂','🥹','😍','🥳','😎','🤩','😢','😤','🤔','🫡','💀','👻','🤡','👽','🤖'],
@@ -13,9 +12,64 @@ const EMOJI_CATEGORIES = {
 
 const ALL_EMOJIS = Object.values(EMOJI_CATEGORIES).flat();
 
-export default function EmojiPicker({ onSelect }) {
+const createStyles = (c) => StyleSheet.create({
+  container: {
+    backgroundColor: c.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderTopColor: c.surfaceVariant,
+    paddingTop: 12,
+    maxHeight: 320,
+  },
+  search: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 12,
+    backgroundColor: c.background,
+    height: 40,
+  },
+  categories: {
+    flexDirection: 'row',
+    paddingHorizontal: 8,
+    marginBottom: 4,
+  },
+  categoryTab: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  activeTab: {
+    backgroundColor: c.surfaceVariant,
+  },
+  categoryText: {
+    color: c.muted,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  activeCategoryText: {
+    color: c.primary,
+  },
+  grid: {
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+  },
+  emojiBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    maxWidth: '12.5%',
+  },
+  emoji: {
+    fontSize: 24,
+  },
+});
+
+export default function EmojiPicker({ onSelect, colors }) {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('Smileys');
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const emojis = search
     ? ALL_EMOJIS.filter((e) => e.includes(search))
@@ -59,57 +113,3 @@ export default function EmojiPicker({ onSelect }) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderTopWidth: 1,
-    borderTopColor: colors.surfaceVariant,
-    paddingTop: 12,
-    maxHeight: 320,
-  },
-  search: {
-    marginHorizontal: 12,
-    marginBottom: 8,
-    borderRadius: 12,
-    backgroundColor: colors.background,
-    height: 40,
-  },
-  categories: {
-    flexDirection: 'row',
-    paddingHorizontal: 8,
-    marginBottom: 4,
-  },
-  categoryTab: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  activeTab: {
-    backgroundColor: colors.surfaceVariant,
-  },
-  categoryText: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  activeCategoryText: {
-    color: colors.primary,
-  },
-  grid: {
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-  },
-  emojiBtn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    maxWidth: '12.5%',
-  },
-  emoji: {
-    fontSize: 24,
-  },
-});

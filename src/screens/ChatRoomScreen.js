@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Avatar, IconButton, ActivityIndicator, List, Modal, Portal, Surface, Text, TextInput } from 'react-native-paper';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
+import { db } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { clearPresence, deleteMessage, forwardMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence, subscribeToChats } from '../services/chatService';
+import { clearPresence, deleteMessage, forwardMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence } from '../services/chatService';
 import { uploadToCloudinary } from '../services/cloudinaryService';
 import EmojiPicker from '../components/EmojiPicker';
 
@@ -25,7 +27,7 @@ const LinkableText = ({ text, style }) => {
   return (
     <Text style={style}>
       {parts.map((part, i) =>
-        URL_REGEX.test(part) ? (
+        part.match(/^(https?:\/\/[^\s]+)$/) ? (
           <Text
             key={i}
             style={[style, { textDecorationLine: 'underline' }]}
@@ -65,6 +67,7 @@ export default function ChatRoomScreen({ route, navigation }) {
   const { chatId, target } = route.params;
   const { user, profile } = useAuth();
   const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -223,11 +226,11 @@ export default function ChatRoomScreen({ route, navigation }) {
     setShowForward(true);
     try {
       const uid = user?.uid || profile?.uid;
-      const unsub = subscribeToChats(uid, (chats) => {
-        const filtered = chats.filter((c) => c.id !== chatId);
-        setChatList(filtered);
-      });
-      unsub();
+      const chatsRef = collection(db, 'chats');
+      const q = query(chatsRef, where('participants', 'array-contains', uid), orderBy('updatedAt', 'desc'));
+      const snapshot = await getDocs(q);
+      const chats = snapshot.docs.filter((d) => d.id !== chatId).map((d) => ({ id: d.id, ...d.data() }));
+      setChatList(chats);
     } catch {
       setChatList([]);
     }
@@ -238,7 +241,9 @@ export default function ChatRoomScreen({ route, navigation }) {
     try {
       const senderObj = senderObjFromProfile(profile, user);
       await forwardMessage(forwardTarget.id, senderObj, forwardItem.text, forwardItem.imageUrl);
-      Alert.alert('Sent', `Message forwarded to ${forwardTarget.partnerMeta?.[forwardTarget.participants?.find((p) => p !== (user?.uid || profile?.uid))]?.username || 'chat'}.`);
+      const partnerId = forwardTarget.participants?.find((p) => p !== (user?.uid || profile?.uid));
+      const partnerName = forwardTarget.participantMeta?.[partnerId]?.username || 'chat';
+      Alert.alert('Sent', `Message forwarded to ${partnerName}.`);
     } catch {
       Alert.alert('Error', 'Failed to forward message.');
     } finally {
@@ -317,6 +322,7 @@ export default function ChatRoomScreen({ route, navigation }) {
       {showEmoji && (
         <EmojiPicker
           onSelect={(emoji) => setText((prev) => prev + emoji)}
+          colors={colors}
         />
       )}
 
@@ -398,10 +404,10 @@ export default function ChatRoomScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: c.background,
   },
   headerTitleContainer: {
     flexDirection: 'row',
@@ -410,10 +416,10 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   headerAvatarBg: {
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
   },
   headerAvatarText: {
-    color: colors.primary,
+    color: c.primary,
     fontWeight: 'bold',
   },
   headerTextContainer: {
@@ -421,12 +427,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerName: {
-    color: colors.onSurface,
+    color: c.onSurface,
     fontWeight: '700',
     fontSize: 15,
   },
   headerEmail: {
-    color: colors.muted,
+    color: c.muted,
     fontSize: 11,
     maxWidth: 200,
   },
@@ -447,7 +453,7 @@ const styles = StyleSheet.create({
   },
   mine: {
     alignSelf: 'flex-end',
-    backgroundColor: colors.primary,
+    backgroundColor: c.primary,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 18,
@@ -455,13 +461,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   mineText: {
-    color: colors.white,
+    color: c.white,
     fontSize: 15,
     lineHeight: 20,
   },
   theirs: {
     alignSelf: 'flex-start',
-    backgroundColor: colors.chatTheirs,
+    backgroundColor: c.chatTheirs,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 4,
@@ -469,7 +475,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   theirsText: {
-    color: colors.onSurface,
+    color: c.onSurface,
     fontSize: 15,
     lineHeight: 20,
   },
@@ -483,7 +489,7 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 12,
     marginBottom: 4,
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -498,41 +504,41 @@ const styles = StyleSheet.create({
     fontWeight: '300',
   },
   mineTime: {
-    color: colors.white,
+    color: c.white,
   },
   theirsTime: {
-    color: colors.muted,
+    color: c.muted,
   },
   composer: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 8,
     gap: 4,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderTopWidth: 1,
-    borderTopColor: colors.surfaceVariant,
+    borderTopColor: c.surfaceVariant,
   },
   input: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: c.background,
     height: 44,
   },
   forwardModal: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     margin: 20,
     borderRadius: 16,
     padding: 16,
     maxHeight: '60%',
   },
   forwardTitle: {
-    color: colors.onSurface,
+    color: c.onSurface,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 12,
     textAlign: 'center',
   },
   forwardEmpty: {
-    color: colors.muted,
+    color: c.muted,
     textAlign: 'center',
     marginTop: 24,
   },

@@ -39,6 +39,7 @@ export default function ChatsScreen({ navigation }) {
   const { colors } = useTheme();
   const { isOnline } = useOnline();
   const { updateTotal } = useUnread();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [chats, setChats] = useState([]);
   const [showComposer, setShowComposer] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -80,8 +81,7 @@ export default function ChatsScreen({ navigation }) {
     getUnreadCounts(user.uid, chats).then((counts) => {
       setUnreadCounts(counts);
       updateTotal(counts);
-      setRefreshing(false);
-    });
+    }).catch(() => {}).finally(() => setRefreshing(false));
   }, [user?.uid, chats, updateTotal]);
 
   const runSearch = async (value) => {
@@ -335,31 +335,31 @@ export default function ChatsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: c.background,
   },
   listContainer: {
     paddingVertical: 8,
   },
   chatItemContainer: {
     borderBottomWidth: 1,
-    borderBottomColor: colors.surface,
+    borderBottomColor: c.surface,
     paddingVertical: 4,
   },
   chatTitle: {
-    color: colors.onSurface,
+    color: c.onSurface,
     fontWeight: '600',
     fontSize: 16,
   },
   chatDescription: {
-    color: colors.muted,
+    color: c.muted,
     fontSize: 13,
     marginTop: 2,
   },
   chatTime: {
-    color: colors.muted,
+    color: c.muted,
     fontSize: 11,
   },
   chatRight: {
@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   unreadBadge: {
-    backgroundColor: colors.primary,
+    backgroundColor: c.primary,
     borderRadius: 10,
     minWidth: 20,
     height: 20,
@@ -376,7 +376,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   unreadText: {
-    color: colors.white,
+    color: c.white,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
   },
   chatSearch: {
     borderRadius: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     height: 44,
   },
   avatarContainer: {
@@ -396,10 +396,10 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
   },
   avatarTextBg: {
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
   },
   avatarLabel: {
-    color: colors.primary,
+    color: c.primary,
     fontWeight: '600',
   },
   onlineDot: {
@@ -411,7 +411,7 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     backgroundColor: '#4CAF50',
     borderWidth: 2,
-    borderColor: colors.surface,
+    borderColor: c.surface,
   },
   emptyContainer: {
     flex: 1,
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
   },
   empty: {
     textAlign: 'center',
-    color: colors.muted,
+    color: c.muted,
     fontSize: 15,
     paddingHorizontal: 40,
     lineHeight: 22,
@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 20,
     bottom: 20,
-    backgroundColor: colors.primary,
+    backgroundColor: c.primary,
     borderRadius: 16,
   },
   backdrop: {
@@ -447,35 +447,35 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     padding: 20,
     gap: 16,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.surfaceVariant,
+    borderColor: c.surfaceVariant,
     borderBottomWidth: 0,
   },
   composerTitle: {
-    color: colors.onSurface,
+    color: c.onSurface,
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 4,
   },
   search: {
     borderRadius: 14,
-    backgroundColor: colors.background,
+    backgroundColor: c.background,
   },
   searchResultsList: {
     marginTop: 4,
   },
   searchItemContainer: {
     borderBottomWidth: 1,
-    borderBottomColor: colors.surfaceVariant,
+    borderBottomColor: c.surfaceVariant,
     paddingVertical: 2,
   },
   searchResultTitle: {
-    color: colors.onSurface,
+    color: c.onSurface,
     fontWeight: '600',
   },
   searchResultDesc: {
-    color: colors.muted,
+    color: c.muted,
   },
   searchAvatarContainer: {
     justifyContent: 'center',
@@ -484,12 +484,12 @@ const styles = StyleSheet.create({
   emptySmall: {
     textAlign: 'center',
     marginTop: 16,
-    color: colors.muted,
+    color: c.muted,
   },
   closeFab: {
     alignSelf: 'center',
     marginTop: 8,
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
   },
   skeletonContainer: {
     paddingTop: 8,
@@ -500,13 +500,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.surface,
+    borderBottomColor: c.surface,
   },
   skeletonAvatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
   },
   skeletonText: {
     marginLeft: 12,
@@ -517,12 +517,12 @@ const styles = StyleSheet.create({
     height: 14,
     width: '50%',
     borderRadius: 4,
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
   },
   skeletonDesc: {
     height: 12,
     width: '70%',
     borderRadius: 4,
-    backgroundColor: colors.surfaceVariant,
+    backgroundColor: c.surfaceVariant,
   },
 });

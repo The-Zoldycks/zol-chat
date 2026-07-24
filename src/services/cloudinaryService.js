@@ -11,7 +11,8 @@ export async function uploadToCloudinary(imageUri) {
     throw new Error('Cloudinary environment variables (EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME / EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET) are missing.');
   }
 
-  const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+  const cleanUri = imageUri.split('?')[0];
+  const ext = cleanUri.split('.').pop()?.toLowerCase() || 'jpg';
   const mimeMap = { png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic' };
   const mimeType = mimeMap[ext] || 'image/jpeg';
 

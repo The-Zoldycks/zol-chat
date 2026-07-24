@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useAuth } from './AuthContext';
@@ -49,8 +49,8 @@ export function OnlineProvider({ children }) {
     };
   }, [user?.uid]);
 
-  const isOnline = (uid) => presenceMap[uid]?.isOnline || false;
-  const isTyping = (uid) => presenceMap[uid]?.typing || false;
+  const isOnline = useCallback((uid) => presenceMap[uid]?.isOnline || false, [presenceMap]);
+  const isTyping = useCallback((uid) => presenceMap[uid]?.typing || false, [presenceMap]);
 
   const value = useMemo(() => ({ isOnline, isTyping, presenceMap }), [isOnline, isTyping, presenceMap]);
 

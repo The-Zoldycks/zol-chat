@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { Button, Card, HelperText, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
@@ -25,6 +25,7 @@ export default function AuthScreen() {
   const [submitting, setSubmitting] = useState(false);
   const { login, register } = useAuth();
   const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const onSubmit = async () => {
     if (!email.trim() || !password) return;
@@ -121,12 +122,12 @@ export default function AuthScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c) => StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: colors.background,
+    backgroundColor: c.background,
   },
   content: {
     gap: 24,
@@ -143,25 +144,25 @@ const styles = StyleSheet.create({
   },
   title: {
     fontWeight: '800',
-    color: colors.onSurface,
+    color: c.onSurface,
     letterSpacing: 1.5,
   },
   subtitle: {
-    color: colors.muted,
+    color: c.muted,
     textAlign: 'center',
   },
   card: {
     borderRadius: 24,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.surfaceVariant,
+    borderColor: c.surfaceVariant,
   },
   cardContent: {
     paddingVertical: 12,
     gap: 4,
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     marginBottom: 8,
   },
   errorText: {
@@ -172,7 +173,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 4,
     marginTop: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: c.primary,
   },
   buttonLabel: {
     fontSize: 15,

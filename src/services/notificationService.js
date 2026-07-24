@@ -26,15 +26,14 @@ export async function registerForPushNotifications() {
   return token.data;
 }
 
-export function setupNotificationListeners(onNotificationReceived) {
+export function setupNotificationListeners(onNotificationReceived, onNotificationTapped) {
   const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
     if (onNotificationReceived) onNotificationReceived(notification);
   });
 
   const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data = response.notification.request.content.data;
-    if (data?.chatId) {
-    }
+    if (onNotificationTapped) onNotificationTapped(data);
   });
 
   return () => {

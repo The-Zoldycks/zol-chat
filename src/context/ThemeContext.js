@@ -19,10 +19,13 @@ export function ThemeProvider({ children }) {
   const toggleTheme = useCallback(() => {
     setIsDark((prev) => {
       const next = !prev;
-      AsyncStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
+  }, [isDark]);
 
   const value = useMemo(() => ({
     isDark,
