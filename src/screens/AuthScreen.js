@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { Button, Card, HelperText, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
-import { colors } from '../theme/theme';
+import { useTheme } from '../context/ThemeContext';
 
 const formatAuthError = (err) => {
   if (!err) return '';
@@ -24,6 +24,7 @@ export default function AuthScreen() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { login, register } = useAuth();
+  const { colors } = useTheme();
 
   const onSubmit = async () => {
     if (!email.trim() || !password) return;

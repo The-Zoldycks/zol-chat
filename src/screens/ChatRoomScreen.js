@@ -1,14 +1,45 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Avatar, IconButton, Text, TextInput } from 'react-native-paper';
+import { Avatar, IconButton, ActivityIndicator, List, Modal, Portal, Surface, Text, TextInput } from 'react-native-paper';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { deleteMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence } from '../services/chatService';
+import { useTheme } from '../context/ThemeContext';
+import { clearPresence, deleteMessage, forwardMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence, subscribeToChats } from '../services/chatService';
 import { uploadToCloudinary } from '../services/cloudinaryService';
-import { colors } from '../theme/theme';
 import EmojiPicker from '../components/EmojiPicker';
+
+const senderObjFromProfile = (profile, user) => ({
+  uid: profile?.uid || user?.uid,
+  email: profile?.email || user?.email,
+  username: profile?.username || user?.displayName || (user?.email ? user.email.split('@')[0] : 'User'),
+  photoURL: profile?.photoURL || user?.photoURL || '',
+});
+
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+const LinkableText = ({ text, style }) => {
+  if (!text) return null;
+  const parts = text.split(URL_REGEX);
+  return (
+    <Text style={style}>
+      {parts.map((part, i) =>
+        URL_REGEX.test(part) ? (
+          <Text
+            key={i}
+            style={[style, { textDecorationLine: 'underline' }]}
+            onPress={() => Linking.openURL(part)}
+          >
+            {part}
+          </Text>
+        ) : (
+          <Text key={i}>{part}</Text>
+        )
+      )}
+    </Text>
+  );
+};
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
@@ -33,15 +64,23 @@ const formatTime = (timestamp) => {
 export default function ChatRoomScreen({ route, navigation }) {
   const { chatId, target } = route.params;
   const { user, profile } = useAuth();
+  const { colors } = useTheme();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [partnerPresence, setPartnerPresence] = useState(null);
+  const [botCooldown, setBotCooldown] = useState(false);
+  const [loadingImages, setLoadingImages] = useState({});
+  const [showForward, setShowForward] = useState(false);
+  const [forwardTarget, setForwardTarget] = useState(null);
+  const [forwardItem, setForwardItem] = useState(null);
+  const [chatList, setChatList] = useState([]);
   const listRef = useRef(null);
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const typingTimeoutRef = useRef(null);
+  const botCooldownRef = useRef(null);
 
   useEffect(() => {
     const isTyping = partnerPresence && Object.values(partnerPresence).some((p) => p.typing);
@@ -91,9 +130,13 @@ export default function ChatRoomScreen({ route, navigation }) {
   useEffect(() => {
     return () => {
       const uid = profile?.uid || user?.uid;
-      if (uid) setTyping(chatId, uid, false);
+      if (uid && target?.uid !== 'zolbot') {
+        setTyping(chatId, uid, false);
+        clearPresence(chatId, uid);
+      }
+      if (botCooldownRef.current) clearTimeout(botCooldownRef.current);
     };
-  }, [chatId, profile?.uid, user?.uid]);
+  }, [chatId, profile?.uid, user?.uid, target?.uid]);
 
   const onTextChange = (value) => {
     setText(value);
@@ -111,18 +154,21 @@ export default function ChatRoomScreen({ route, navigation }) {
   const onSend = async () => {
     const messageText = text.trim();
     if (!messageText || sending) return;
+    if (target?.uid === 'zolbot' && botCooldown) {
+      Alert.alert('Please wait', 'Zolbot is still thinking. Try again in a few seconds.');
+      return;
+    }
 
     setText('');
     setShowEmoji(false);
     setSending(true);
     try {
-      const senderObj = {
-        uid: profile?.uid || user?.uid,
-        email: profile?.email || user?.email,
-        username: profile?.username || user?.displayName || (user?.email ? user.email.split('@')[0] : 'User'),
-        photoURL: profile?.photoURL || user?.photoURL || '',
-      };
-      await sendMessage(chatId, senderObj, messageText);
+      await sendMessage(chatId, senderObjFromProfile(profile, user), messageText);
+      if (target?.uid === 'zolbot') {
+        setBotCooldown(true);
+        if (botCooldownRef.current) clearTimeout(botCooldownRef.current);
+        botCooldownRef.current = setTimeout(() => setBotCooldown(false), 5000);
+      }
     } catch {
       Alert.alert('Error', 'Failed to send message. Please try again.');
     } finally {
@@ -148,13 +194,7 @@ export default function ChatRoomScreen({ route, navigation }) {
     try {
       const imageUri = result.assets[0].uri;
       const imageUrl = await uploadToCloudinary(imageUri);
-      const senderObj = {
-        uid: profile?.uid || user?.uid,
-        email: profile?.email || user?.email,
-        username: profile?.username || user?.displayName || (user?.email ? user.email.split('@')[0] : 'User'),
-        photoURL: profile?.photoURL || user?.photoURL || '',
-      };
-      await sendImageMessage(chatId, senderObj, imageUrl);
+      await sendImageMessage(chatId, senderObjFromProfile(profile, user), imageUrl);
     } catch {
       Alert.alert('Error', 'Failed to send image. Please try again.');
     } finally {
@@ -162,10 +202,53 @@ export default function ChatRoomScreen({ route, navigation }) {
     }
   };
 
-  const onDeleteMessage = (item) => {
+  const onLongPressMessage = (item) => {
     const isMine = item.senderId === (user?.uid || profile?.uid);
-    if (!isMine) return;
+    const options = [
+      { text: 'Forward', onPress: () => startForward(item) },
+    ];
+    if (isMine) {
+      options.push({
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => confirmDelete(item),
+      });
+    }
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Message options', '', options);
+  };
 
+  const startForward = async (item) => {
+    setForwardItem(item);
+    setShowForward(true);
+    try {
+      const uid = user?.uid || profile?.uid;
+      const unsub = subscribeToChats(uid, (chats) => {
+        const filtered = chats.filter((c) => c.id !== chatId);
+        setChatList(filtered);
+      });
+      unsub();
+    } catch {
+      setChatList([]);
+    }
+  };
+
+  const confirmForward = async () => {
+    if (!forwardTarget || !forwardItem) return;
+    try {
+      const senderObj = senderObjFromProfile(profile, user);
+      await forwardMessage(forwardTarget.id, senderObj, forwardItem.text, forwardItem.imageUrl);
+      Alert.alert('Sent', `Message forwarded to ${forwardTarget.partnerMeta?.[forwardTarget.participants?.find((p) => p !== (user?.uid || profile?.uid))]?.username || 'chat'}.`);
+    } catch {
+      Alert.alert('Error', 'Failed to forward message.');
+    } finally {
+      setShowForward(false);
+      setForwardTarget(null);
+      setForwardItem(null);
+    }
+  };
+
+  const confirmDelete = (item) => {
     Alert.alert(
       'Delete message',
       'Are you sure you want to delete this message?',
@@ -203,14 +286,25 @@ export default function ChatRoomScreen({ route, navigation }) {
           const mine = item.senderId === (user?.uid || profile?.uid);
           return (
             <Pressable
-              onLongPress={() => onDeleteMessage(item)}
+              onLongPress={() => onLongPressMessage(item)}
               style={[styles.bubble, mine ? styles.mine : styles.theirs]}
             >
               {item.imageUrl ? (
-                <Avatar.Image source={{ uri: item.imageUrl }} size={200} style={styles.messageImage} />
+                <View style={styles.imageContainer}>
+                  {loadingImages[item.id] !== false && (
+                    <ActivityIndicator style={styles.imageLoader} size="small" color={colors.primary} />
+                  )}
+                  <Image
+                    source={{ uri: item.imageUrl }}
+                    style={styles.messageImage}
+                    resizeMode="cover"
+                    onLoadStart={() => setLoadingImages((prev) => ({ ...prev, [item.id]: true }))}
+                    onLoadEnd={() => setLoadingImages((prev) => ({ ...prev, [item.id]: false }))}
+                  />
+                </View>
               ) : null}
               {item.text ? (
-                <Text style={mine ? styles.mineText : styles.theirsText}>{item.text}</Text>
+                <LinkableText text={item.text} style={mine ? styles.mineText : styles.theirsText} />
               ) : null}
               <Text style={[styles.timeText, mine ? styles.mineTime : styles.theirsTime]}>
                 {formatTime(item.createdAt)}
@@ -244,7 +338,7 @@ export default function ChatRoomScreen({ route, navigation }) {
           value={text} 
           onChangeText={onTextChange} 
           mode="outlined" 
-          placeholder="Message..." 
+          placeholder={botCooldown ? 'Zolbot is thinking...' : 'Message...'}
           placeholderTextColor={colors.muted}
           style={styles.input} 
           activeOutlineColor={colors.primary}
@@ -254,17 +348,52 @@ export default function ChatRoomScreen({ route, navigation }) {
           returnKeyType="send"
           onSubmitEditing={onSend}
           blurOnSubmit={false}
+          editable={!botCooldown}
         />
         <IconButton 
           icon="send" 
           mode="contained" 
           onPress={onSend} 
-          disabled={!text.trim() || sending} 
+          disabled={!text.trim() || sending || botCooldown} 
           containerColor={colors.primary}
           iconColor={colors.background}
           size={24}
         />
       </View>
+
+      <Portal>
+        <Modal visible={showForward} onDismiss={() => { setShowForward(false); setForwardTarget(null); setForwardItem(null); }} contentContainerStyle={styles.forwardModal}>
+          <Text style={styles.forwardTitle}>Forward to...</Text>
+          <FlatList
+            data={chatList}
+            keyExtractor={(item) => item.id}
+            ListEmptyComponent={<Text style={styles.forwardEmpty}>No other chats available.</Text>}
+            renderItem={({ item }) => {
+              const partnerId = item.participants?.find((p) => p !== (user?.uid || profile?.uid));
+              const partner = item.participantMeta?.[partnerId] || {};
+              return (
+                <List.Item
+                  title={partner.username || partner.email || 'Unknown'}
+                  description={item.lastMessage || ''}
+                  onPress={() => { setForwardTarget(item); }}
+                  titleStyle={{ color: colors.onSurface }}
+                  descriptionStyle={{ color: colors.muted }}
+                  style={forwardTarget?.id === item.id ? { backgroundColor: colors.surfaceVariant, borderRadius: 8 } : undefined}
+                />
+              );
+            }}
+          />
+          <IconButton
+            icon="send"
+            mode="contained"
+            onPress={confirmForward}
+            disabled={!forwardTarget}
+            containerColor={colors.primary}
+            iconColor={colors.background}
+            style={styles.forwardSendBtn}
+          />
+        </Modal>
+      </Portal>
     </KeyboardAvoidingView>
   );
 }
@@ -345,8 +474,22 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   messageImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+  },
+  imageContainer: {
+    width: 200,
+    height: 200,
     borderRadius: 12,
     marginBottom: 4,
+    backgroundColor: colors.surfaceVariant,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageLoader: {
+    position: 'absolute',
+    zIndex: 1,
   },
   timeText: {
     fontSize: 9,
@@ -373,5 +516,28 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     height: 44,
+  },
+  forwardModal: {
+    backgroundColor: colors.surface,
+    margin: 20,
+    borderRadius: 16,
+    padding: 16,
+    maxHeight: '60%',
+  },
+  forwardTitle: {
+    color: colors.onSurface,
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  forwardEmpty: {
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: 24,
+  },
+  forwardSendBtn: {
+    alignSelf: 'center',
+    marginTop: 8,
   },
 });

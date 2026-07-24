@@ -18,7 +18,7 @@ export default function EmojiPicker({ onSelect }) {
   const [activeCategory, setActiveCategory] = useState('Smileys');
 
   const emojis = search
-    ? ALL_EMOJIS.filter(() => true)
+    ? ALL_EMOJIS.filter((e) => e.includes(search))
     : EMOJI_CATEGORIES[activeCategory] || ALL_EMOJIS;
 
   return (
@@ -65,6 +65,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceVariant,
     paddingTop: 12,
     maxHeight: 320,
   },

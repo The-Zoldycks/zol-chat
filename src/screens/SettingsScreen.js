@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Avatar, Button, Card, IconButton, Text, TextInput } from 'react-native-paper';
+import { Avatar, Button, Card, IconButton, Switch, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import { uploadToCloudinary } from '../services/cloudinaryService';
-import { colors } from '../theme/theme';
 
 export default function SettingsScreen() {
   const { user, profile, logout, updateUserProfile } = useAuth();
+  const { colors, isDark, toggleTheme } = useTheme();
   const [username, setUsername] = useState('');
   const [photoURL, setPhotoURL] = useState('');
   const [saving, setSaving] = useState(false);
@@ -159,13 +160,21 @@ export default function SettingsScreen() {
           <Button 
             mode="outlined" 
             onPress={onLogout} 
-            style={styles.logoutBtn} 
+            style={[styles.logoutBtn, { borderColor: colors.danger }]} 
             textColor={colors.danger}
-            outlineColor={colors.danger}
             disabled={saving}
           >
             Log Out
           </Button>
+
+          <View style={[styles.themeRow, { borderTopColor: colors.surfaceVariant }]}>
+            <Text style={[styles.themeLabel, { color: colors.onSurface }]}>Dark Mode</Text>
+            <Switch
+              value={isDark}
+              onValueChange={toggleTheme}
+              color={colors.primary}
+            />
+          </View>
         </Card.Content>
       </Card>
     </View>
@@ -261,6 +270,16 @@ const styles = StyleSheet.create({
   logoutBtn: {
     borderRadius: 12,
     paddingVertical: 4,
-    borderColor: colors.danger,
+  },
+  themeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 16,
+    borderTopWidth: 1,
+  },
+  themeLabel: {
+    fontSize: 16,
+    fontWeight: '500',
   },
 });

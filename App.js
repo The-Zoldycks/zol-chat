@@ -3,20 +3,29 @@ import { StatusBar } from 'expo-status-bar';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/context/AuthContext';
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import { appTheme } from './src/theme/theme';
 import ErrorBoundary from './src/components/ErrorBoundary';
+
+function ThemedApp() {
+  const { paperTheme, isDark } = useTheme();
+  return (
+    <PaperProvider theme={paperTheme}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <AppNavigator />
+    </PaperProvider>
+  );
+}
 
 export default function App() {
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <PaperProvider theme={appTheme}>
+        <ThemeProvider>
           <AuthProvider>
-            <StatusBar style="light" />
-            <AppNavigator />
+            <ThemedApp />
           </AuthProvider>
-        </PaperProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
   );

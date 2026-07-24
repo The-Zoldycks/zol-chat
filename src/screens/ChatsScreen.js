@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Avatar, FAB, List, Portal, Searchbar, Surface, Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { useOnline } from '../context/OnlineContext';
 import { useUnread } from '../context/UnreadContext';
-import { findUsersByEmailOrUsername, getUnreadCounts, startOrOpenChat, subscribeToChats } from '../services/chatService';
-import { colors } from '../theme/theme';
+import { findUsersByEmailOrUsername, getUnreadCounts, startOrOpenChat, subscribeToChats, deleteChat } from '../services/chatService';
 
 const formatChatTime = (timestamp) => {
   if (!timestamp) return '';
@@ -35,6 +36,8 @@ const formatChatTime = (timestamp) => {
 
 export default function ChatsScreen({ navigation }) {
   const { user, profile, isNewUser, dismissNewUser } = useAuth();
+  const { colors } = useTheme();
+  const { isOnline } = useOnline();
   const { updateTotal } = useUnread();
   const [chats, setChats] = useState([]);
   const [showComposer, setShowComposer] = useState(false);
@@ -44,6 +47,7 @@ export default function ChatsScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [chatFilter, setChatFilter] = useState('');
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [loadingChats, setLoadingChats] = useState(true);
   const insets = useSafeAreaInsets();
 
   // Redirect new users to Settings page to finish their profile setup
@@ -56,7 +60,10 @@ export default function ChatsScreen({ navigation }) {
 
   useEffect(() => {
     if (!user?.uid) return;
-    const unsubscribe = subscribeToChats(user.uid, setChats);
+    const unsubscribe = subscribeToChats(user.uid, (data) => {
+      setChats(data);
+      setLoadingChats(false);
+    });
     return unsubscribe;
   }, [user?.uid]);
 
@@ -70,8 +77,12 @@ export default function ChatsScreen({ navigation }) {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    getUnreadCounts(user.uid, chats).then((counts) => {
+      setUnreadCounts(counts);
+      updateTotal(counts);
+      setRefreshing(false);
+    });
+  }, [user?.uid, chats, updateTotal]);
 
   const runSearch = async (value) => {
     setSearchTerm(value);
@@ -103,6 +114,27 @@ export default function ChatsScreen({ navigation }) {
     setShowComposer(false);
     setSearchTerm('');
     setResults([]);
+  };
+
+  const onDeleteChat = (chat) => {
+    Alert.alert(
+      'Delete chat',
+      `Delete your chat with ${chat.partner.username || chat.partner.email || 'this user'}? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteChat(chat.id);
+            } catch {
+              Alert.alert('Error', 'Failed to delete chat.');
+            }
+          },
+        },
+      ],
+    );
   };
 
   const items = useMemo(() => {
@@ -144,6 +176,20 @@ export default function ChatsScreen({ navigation }) {
     });
   }, [items, chatFilter]);
 
+  const renderSkeleton = () => (
+    <View style={styles.skeletonContainer}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <View key={i} style={styles.skeletonItem}>
+          <View style={styles.skeletonAvatar} />
+          <View style={styles.skeletonText}>
+            <View style={styles.skeletonTitle} />
+            <View style={styles.skeletonDesc} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.searchBarContainer}>
@@ -164,9 +210,11 @@ export default function ChatsScreen({ navigation }) {
         refreshing={refreshing}
         onRefresh={onRefresh}
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.empty}>No chats yet. Start a conversation with the + button.</Text>
-          </View>
+          loadingChats ? renderSkeleton() : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.empty}>No chats yet. Start a conversation with the + button.</Text>
+            </View>
+          )
         }
         renderItem={({ item }) => (
           <View style={styles.chatItemContainer}>
@@ -174,6 +222,7 @@ export default function ChatsScreen({ navigation }) {
               title={item.partner.username || item.partner.email || 'Unknown User'}
               description={item.lastMessage || 'Say hello 👋'}
               onPress={() => navigation.navigate('ChatRoom', { chatId: item.id, target: item.partner })}
+              onLongPress={() => onDeleteChat(item)}
               titleStyle={styles.chatTitle}
               descriptionStyle={styles.chatDescription}
               right={() => (
@@ -188,18 +237,23 @@ export default function ChatsScreen({ navigation }) {
               )}
               left={() => (
                 <View style={styles.avatarContainer}>
-                  {item.partner.uid === 'zolbot' ? (
-                    <Avatar.Image source={require('../../assets/zolbot.jpg')} size={48} />
-                  ) : item.partner.photoURL ? (
-                    <Avatar.Image source={{ uri: item.partner.photoURL }} size={48} />
-                  ) : (
-                    <Avatar.Text 
-                      size={48} 
-                      label={(item.partner.username || item.partner.email || '?').slice(0, 2).toUpperCase()} 
-                      style={styles.avatarTextBg}
-                      labelStyle={styles.avatarLabel}
-                    />
-                  )}
+                  <View>
+                    {item.partner.uid === 'zolbot' ? (
+                      <Avatar.Image source={require('../../assets/zolbot.jpg')} size={48} />
+                    ) : item.partner.photoURL ? (
+                      <Avatar.Image source={{ uri: item.partner.photoURL }} size={48} />
+                    ) : (
+                      <Avatar.Text 
+                        size={48} 
+                        label={(item.partner.username || item.partner.email || '?').slice(0, 2).toUpperCase()} 
+                        style={styles.avatarTextBg}
+                        labelStyle={styles.avatarLabel}
+                      />
+                    )}
+                    {item.partner.uid !== 'zolbot' && isOnline(item.partner.uid) && (
+                      <View style={styles.onlineDot} />
+                    )}
+                  </View>
                 </View>
               )}
             />
@@ -348,6 +402,17 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
   },
+  onlineDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#4CAF50',
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -424,6 +489,40 @@ const styles = StyleSheet.create({
   closeFab: {
     alignSelf: 'center',
     marginTop: 8,
+    backgroundColor: colors.surfaceVariant,
+  },
+  skeletonContainer: {
+    paddingTop: 8,
+  },
+  skeletonItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surface,
+  },
+  skeletonAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.surfaceVariant,
+  },
+  skeletonText: {
+    marginLeft: 12,
+    flex: 1,
+    gap: 8,
+  },
+  skeletonTitle: {
+    height: 14,
+    width: '50%',
+    borderRadius: 4,
+    backgroundColor: colors.surfaceVariant,
+  },
+  skeletonDesc: {
+    height: 12,
+    width: '70%',
+    borderRadius: 4,
     backgroundColor: colors.surfaceVariant,
   },
 });

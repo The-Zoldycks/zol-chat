@@ -101,11 +101,6 @@ export async function getUnreadCounts(uid, chats) {
   await Promise.all(
     chats.map(async (chat) => {
       const lastRead = chat.participantMeta?.[uid]?.lastRead;
-      if (!lastRead) {
-        counts[chat.id] = 0;
-        return;
-      }
-      const lastReadDate = lastRead?.toDate ? lastRead.toDate() : new Date(lastRead);
       const messagesSnap = await getDocs(
         query(
           collection(db, 'chats', chat.id, 'messages'),
@@ -114,13 +109,21 @@ export async function getUnreadCounts(uid, chats) {
         )
       );
       let count = 0;
-      messagesSnap.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.senderId !== uid) {
-          const msgDate = data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt?.seconds * 1000 || 0);
-          if (msgDate > lastReadDate) count++;
-        }
-      });
+      if (!lastRead) {
+        messagesSnap.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.senderId !== uid) count++;
+        });
+      } else {
+        const lastReadDate = lastRead?.toDate ? lastRead.toDate() : new Date(lastRead);
+        messagesSnap.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.senderId !== uid) {
+            const msgDate = data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt?.seconds * 1000 || 0);
+            if (msgDate > lastReadDate) count++;
+          }
+        });
+      }
       counts[chat.id] = count;
     })
   );
@@ -279,6 +282,33 @@ export async function deleteMessage(chatId, messageId) {
   await deleteDoc(doc(db, 'chats', chatId, 'messages', messageId));
 }
 
+export async function deleteChat(chatId) {
+  await deleteDoc(doc(db, 'chats', chatId));
+}
+
+export async function forwardMessage(targetChatId, sender, originalText, originalImageUrl) {
+  const senderId = sender?.uid || 'user';
+  const senderEmail = sender?.email || '';
+  const senderUsername = sender?.username || sender?.displayName || senderEmail || 'User';
+
+  const text = originalText ? `Forwarded: ${originalText}` : '';
+
+  await addDoc(collection(db, 'chats', targetChatId, 'messages'), {
+    text,
+    imageUrl: originalImageUrl || null,
+    senderId,
+    senderEmail,
+    senderUsername,
+    createdAt: serverTimestamp(),
+    forwarded: true,
+  });
+
+  await updateDoc(doc(db, 'chats', targetChatId), {
+    lastMessage: originalImageUrl ? '📷 Photo' : text,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function sendImageMessage(chatId, sender, imageUrl) {
   const senderId = sender?.uid || 'user';
   const senderEmail = sender?.email || '';
@@ -322,5 +352,15 @@ export function subscribeToPresence(chatId, uid, onPresenceChange) {
   }, () => {
     onPresenceChange({});
   });
+}
+
+export async function clearPresence(chatId, uid) {
+  if (!chatId || !uid) return;
+  try {
+    const presenceRef = doc(db, 'chats', chatId, 'presence', uid);
+    await deleteDoc(presenceRef);
+  } catch {
+    // Presence cleanup is best-effort
+  }
 }
 

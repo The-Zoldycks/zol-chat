@@ -14,6 +14,11 @@ const TestComponent = () => {
   );
 };
 
+const BadComponent = () => {
+  useAuth();
+  return <Text>should not render</Text>;
+};
+
 describe('AuthContext', () => {
   it('provides loading state initially', () => {
     const { getByTestId } = render(
@@ -22,5 +27,11 @@ describe('AuthContext', () => {
       </AuthProvider>
     );
     expect(getByTestId('loading').props.children).toBe('loaded');
+  });
+
+  it('throws when useAuth is used outside AuthProvider', () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => render(<BadComponent />)).toThrow('useAuth must be used within an AuthProvider');
+    spy.mockRestore();
   });
 });

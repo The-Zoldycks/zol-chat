@@ -11,11 +11,15 @@ export async function uploadToCloudinary(imageUri) {
     throw new Error('Cloudinary environment variables (EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME / EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET) are missing.');
   }
 
+  const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+  const mimeMap = { png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic' };
+  const mimeType = mimeMap[ext] || 'image/jpeg';
+
   const formData = new FormData();
   formData.append('file', {
     uri: imageUri,
-    type: 'image/jpeg',
-    name: `avatar_${Date.now()}.jpg`,
+    type: mimeType,
+    name: `upload_${Date.now()}.${ext}`,
   });
   formData.append('upload_preset', uploadPreset);
 
