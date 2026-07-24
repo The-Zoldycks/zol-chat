@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Avatar, IconButton, Text, TextInput } from 'react-native-paper';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { sendMessage, subscribeToMessages } from '../services/chatService';
+import { deleteMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence } from '../services/chatService';
+import { uploadToCloudinary } from '../services/cloudinaryService';
 import { colors } from '../theme/theme';
+import EmojiPicker from '../components/EmojiPicker';
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
@@ -33,12 +36,15 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [partnerPresence, setPartnerPresence] = useState(null);
   const listRef = useRef(null);
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
+  const typingTimeoutRef = useRef(null);
 
-  // Set the screen header options dynamically to display target user info in standard stack header
   useEffect(() => {
+    const isTyping = partnerPresence && Object.values(partnerPresence).some((p) => p.typing);
     navigation.setOptions({
       headerTitle: () => (
         <View style={styles.headerTitleContainer}>
@@ -55,24 +61,59 @@ export default function ChatRoomScreen({ route, navigation }) {
             />
           )}
           <View style={styles.headerTextContainer}>
-            <Text style={styles.headerName}>{target?.username || target?.email || 'Unknown'}</Text>
-            <Text style={styles.headerEmail} numberOfLines={1}>{target?.email || ''}</Text>
+            <Text style={styles.headerName} numberOfLines={1}>{target?.username || target?.email || 'Unknown'}</Text>
+            <Text style={styles.headerEmail} numberOfLines={1}>
+              {isTyping ? 'typing...' : target?.email || ''}
+            </Text>
           </View>
         </View>
       ),
     });
-  }, [navigation, target]);
+  }, [navigation, target, partnerPresence]);
 
   useEffect(() => {
     const unsubscribe = subscribeToMessages(chatId, setMessages);
     return unsubscribe;
   }, [chatId]);
 
+  useEffect(() => {
+    const uid = profile?.uid || user?.uid;
+    if (uid) markChatAsRead(chatId, uid);
+  }, [chatId, profile?.uid, user?.uid]);
+
+  useEffect(() => {
+    const uid = profile?.uid || user?.uid;
+    if (!uid || target?.uid === 'zolbot') return;
+    const unsubscribe = subscribeToPresence(chatId, uid, setPartnerPresence);
+    return unsubscribe;
+  }, [chatId, profile?.uid, user?.uid, target?.uid]);
+
+  useEffect(() => {
+    return () => {
+      const uid = profile?.uid || user?.uid;
+      if (uid) setTyping(chatId, uid, false);
+    };
+  }, [chatId, profile?.uid, user?.uid]);
+
+  const onTextChange = (value) => {
+    setText(value);
+    const uid = profile?.uid || user?.uid;
+    if (!uid || target?.uid === 'zolbot') return;
+    setTyping(chatId, uid, value.length > 0);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    if (value.length > 0) {
+      typingTimeoutRef.current = setTimeout(() => {
+        setTyping(chatId, uid, false);
+      }, 3000);
+    }
+  };
+
   const onSend = async () => {
     const messageText = text.trim();
     if (!messageText || sending) return;
 
     setText('');
+    setShowEmoji(false);
     setSending(true);
     try {
       const senderObj = {
@@ -87,6 +128,62 @@ export default function ChatRoomScreen({ route, navigation }) {
     } finally {
       setSending(false);
     }
+  };
+
+  const onSendImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please allow photo access to share images.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+
+    if (result.canceled) return;
+
+    setSending(true);
+    try {
+      const imageUri = result.assets[0].uri;
+      const imageUrl = await uploadToCloudinary(imageUri);
+      const senderObj = {
+        uid: profile?.uid || user?.uid,
+        email: profile?.email || user?.email,
+        username: profile?.username || user?.displayName || (user?.email ? user.email.split('@')[0] : 'User'),
+        photoURL: profile?.photoURL || user?.photoURL || '',
+      };
+      await sendImageMessage(chatId, senderObj, imageUrl);
+    } catch {
+      Alert.alert('Error', 'Failed to send image. Please try again.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const onDeleteMessage = (item) => {
+    const isMine = item.senderId === (user?.uid || profile?.uid);
+    if (!isMine) return;
+
+    Alert.alert(
+      'Delete message',
+      'Are you sure you want to delete this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteMessage(chatId, item.id);
+            } catch {
+              Alert.alert('Error', 'Failed to delete message.');
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -105,20 +202,47 @@ export default function ChatRoomScreen({ route, navigation }) {
         renderItem={({ item }) => {
           const mine = item.senderId === (user?.uid || profile?.uid);
           return (
-            <View style={[styles.bubble, mine ? styles.mine : styles.theirs]}>
-              <Text style={mine ? styles.mineText : styles.theirsText}>{item.text}</Text>
+            <Pressable
+              onLongPress={() => onDeleteMessage(item)}
+              style={[styles.bubble, mine ? styles.mine : styles.theirs]}
+            >
+              {item.imageUrl ? (
+                <Avatar.Image source={{ uri: item.imageUrl }} size={200} style={styles.messageImage} />
+              ) : null}
+              {item.text ? (
+                <Text style={mine ? styles.mineText : styles.theirsText}>{item.text}</Text>
+              ) : null}
               <Text style={[styles.timeText, mine ? styles.mineTime : styles.theirsTime]}>
                 {formatTime(item.createdAt)}
               </Text>
-            </View>
+            </Pressable>
           );
         }}
       />
 
+      {showEmoji && (
+        <EmojiPicker
+          onSelect={(emoji) => setText((prev) => prev + emoji)}
+        />
+      )}
+
       <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <IconButton
+          icon="emoticon-outline"
+          onPress={() => setShowEmoji((prev) => !prev)}
+          size={24}
+          iconColor={showEmoji ? colors.primary : colors.muted}
+        />
+        <IconButton
+          icon="image"
+          onPress={onSendImage}
+          size={24}
+          iconColor={colors.muted}
+          disabled={sending}
+        />
         <TextInput 
           value={text} 
-          onChangeText={setText} 
+          onChangeText={onTextChange} 
           mode="outlined" 
           placeholder="Message..." 
           placeholderTextColor={colors.muted}
@@ -165,6 +289,7 @@ const styles = StyleSheet.create({
   },
   headerTextContainer: {
     justifyContent: 'center',
+    flex: 1,
   },
   headerName: {
     color: colors.onSurface,
@@ -189,6 +314,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     elevation: 1,
+    alignSelf: 'flex-start',
   },
   mine: {
     alignSelf: 'flex-end',
@@ -197,6 +323,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 4,
+    overflow: 'hidden',
   },
   mineText: {
     color: colors.white,
@@ -210,11 +337,16 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 4,
     borderBottomRightRadius: 18,
+    overflow: 'hidden',
   },
   theirsText: {
     color: colors.onSurface,
     fontSize: 15,
     lineHeight: 20,
+  },
+  messageImage: {
+    borderRadius: 12,
+    marginBottom: 4,
   },
   timeText: {
     fontSize: 9,
@@ -231,8 +363,8 @@ const styles = StyleSheet.create({
   composer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    gap: 8,
+    padding: 8,
+    gap: 4,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.surfaceVariant,
@@ -240,6 +372,6 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     backgroundColor: colors.background,
-    height: 48,
+    height: 44,
   },
 });

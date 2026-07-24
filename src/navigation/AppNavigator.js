@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
+import { UnreadProvider, useUnread } from '../context/UnreadContext';
 import { colors } from '../theme/theme';
 import AuthScreen from '../screens/AuthScreen';
 import ChatsScreen from '../screens/ChatsScreen';
@@ -28,6 +29,7 @@ const navTheme = {
 
 function HomeTabs() {
   const insets = useSafeAreaInsets();
+  const { totalUnread } = useUnread();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -46,7 +48,16 @@ function HomeTabs() {
       <Tab.Screen
         name="Chats"
         component={ChatsScreen}
-        options={{ tabBarIcon: ({ color }) => <Icon source="chat" color={color} size={22} /> }}
+        options={{
+          tabBarIcon: ({ color }) => <Icon source="chat" color={color} size={22} />,
+          tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: colors.primary,
+            color: colors.white,
+            fontSize: 10,
+            fontWeight: '700',
+          },
+        }}
       />
       <Tab.Screen
         name="Settings"
@@ -69,26 +80,28 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
-      <Stack.Navigator>
-        {user ? (
-          <>
-            <Stack.Screen name="Home" component={HomeTabs} options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="ChatRoom" 
-              component={ChatRoomScreen} 
-              options={{ 
-                title: 'Chat',
-                headerStyle: { backgroundColor: colors.surface },
-                headerTintColor: colors.onSurface,
-                headerShadowVisible: false,
-              }} 
-            />
-          </>
-        ) : (
-          <Stack.Screen name="Auth" component={AuthScreen} options={{ headerShown: false }} />
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <UnreadProvider>
+      <NavigationContainer theme={navTheme}>
+        <Stack.Navigator>
+          {user ? (
+            <>
+              <Stack.Screen name="Home" component={HomeTabs} options={{ headerShown: false }} />
+              <Stack.Screen 
+                name="ChatRoom" 
+                component={ChatRoomScreen} 
+                options={{ 
+                  title: 'Chat',
+                  headerStyle: { backgroundColor: colors.surface },
+                  headerTintColor: colors.onSurface,
+                  headerShadowVisible: false,
+                }} 
+              />
+            </>
+          ) : (
+            <Stack.Screen name="Auth" component={AuthScreen} options={{ headerShown: false }} />
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </UnreadProvider>
   );
 }

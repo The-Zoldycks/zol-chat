@@ -82,7 +82,8 @@ export default function AuthScreen() {
                 <TextInput.Icon 
                   icon={showPassword ? 'eye-off' : 'eye'} 
                   color={colors.muted} 
-                  onPress={() => setShowPassword((prev) => !prev)} 
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
                 />
               }
             />

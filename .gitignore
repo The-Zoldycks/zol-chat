@@ -6,7 +6,3 @@ npm-debug.log*
 .DS_Store
 .env
 google-services.json
-functions/node_modules
-functions/.env
-firebase-debug.log
-firebase-debug.*.log

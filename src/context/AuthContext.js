@@ -21,6 +21,8 @@ export function AuthProvider({ children }) {
   const profileRef = useRef(null);
   profileRef.current = profile;
 
+  const dismissNewUser = useCallback(() => setIsNewUser(false), []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
       setUser(authUser);
@@ -75,8 +77,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, profile, loading, register, login, logout, updateUserProfile, isNewUser, setIsNewUser }),
-    [user, profile, loading, register, login, logout, updateUserProfile, isNewUser],
+    () => ({ user, profile, loading, register, login, logout, updateUserProfile, isNewUser, dismissNewUser }),
+    [user, profile, loading, register, login, logout, updateUserProfile, isNewUser, dismissNewUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

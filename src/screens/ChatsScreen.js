@@ -1,33 +1,77 @@
-import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Avatar, FAB, List, Portal, Searchbar, Surface, Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { findUsersByEmailOrUsername, startOrOpenChat, subscribeToChats } from '../services/chatService';
+import { useUnread } from '../context/UnreadContext';
+import { findUsersByEmailOrUsername, getUnreadCounts, startOrOpenChat, subscribeToChats } from '../services/chatService';
 import { colors } from '../theme/theme';
 
+const formatChatTime = (timestamp) => {
+  if (!timestamp) return '';
+  try {
+    let date;
+    if (timestamp?.toDate) {
+      date = timestamp.toDate();
+    } else if (timestamp?.seconds != null) {
+      date = new Date(timestamp.seconds * 1000);
+    } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+      date = new Date(timestamp);
+    } else {
+      return '';
+    }
+    if (Number.isNaN(date.getTime())) return '';
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffDays === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' });
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } catch {
+    return '';
+  }
+};
+
 export default function ChatsScreen({ navigation }) {
-  const { user, profile, isNewUser, setIsNewUser } = useAuth();
+  const { user, profile, isNewUser, dismissNewUser } = useAuth();
+  const { updateTotal } = useUnread();
   const [chats, setChats] = useState([]);
   const [showComposer, setShowComposer] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [chatFilter, setChatFilter] = useState('');
+  const [unreadCounts, setUnreadCounts] = useState({});
   const insets = useSafeAreaInsets();
 
   // Redirect new users to Settings page to finish their profile setup
   useEffect(() => {
     if (isNewUser) {
-      setIsNewUser(false);
+      dismissNewUser();
       navigation.navigate('Settings');
     }
-  }, [isNewUser, navigation, setIsNewUser]);
+  }, [isNewUser, navigation, dismissNewUser]);
 
   useEffect(() => {
     if (!user?.uid) return;
     const unsubscribe = subscribeToChats(user.uid, setChats);
     return unsubscribe;
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid || !chats.length) return;
+    getUnreadCounts(user.uid, chats).then((counts) => {
+      setUnreadCounts(counts);
+      updateTotal(counts);
+    });
+  }, [user?.uid, chats, updateTotal]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1000);
+  }, []);
 
   const runSearch = async (value) => {
     setSearchTerm(value);
@@ -91,12 +135,34 @@ export default function ChatsScreen({ navigation }) {
     return chatItems;
   }, [chats, user?.uid]);
 
+  const filteredItems = useMemo(() => {
+    if (!chatFilter.trim()) return items;
+    const term = chatFilter.toLowerCase();
+    return items.filter((item) => {
+      const name = (item.partner.username || item.partner.email || '').toLowerCase();
+      return name.includes(term);
+    });
+  }, [items, chatFilter]);
+
   return (
     <View style={styles.container}>
+      <View style={styles.searchBarContainer}>
+        <Searchbar
+          placeholder="Search chats..."
+          value={chatFilter}
+          onChangeText={setChatFilter}
+          style={styles.chatSearch}
+          placeholderTextColor={colors.muted}
+          iconColor={colors.muted}
+          textColor={colors.onSurface}
+        />
+      </View>
       <FlatList
-        data={items}
+        data={filteredItems}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.empty}>No chats yet. Start a conversation with the + button.</Text>
@@ -110,6 +176,16 @@ export default function ChatsScreen({ navigation }) {
               onPress={() => navigation.navigate('ChatRoom', { chatId: item.id, target: item.partner })}
               titleStyle={styles.chatTitle}
               descriptionStyle={styles.chatDescription}
+              right={() => (
+                <View style={styles.chatRight}>
+                  <Text style={styles.chatTime}>{formatChatTime(item.updatedAt)}</Text>
+                  {(unreadCounts[item.id] || 0) > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadText}>{unreadCounts[item.id]}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
               left={() => (
                 <View style={styles.avatarContainer}>
                   {item.partner.uid === 'zolbot' ? (
@@ -133,7 +209,11 @@ export default function ChatsScreen({ navigation }) {
 
       <Portal>
         {showComposer && (
-          <View style={StyleSheet.absoluteFill}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="box-none"
+          >
             <Pressable style={styles.backdrop} onPress={closeComposer} />
             <Surface style={styles.composer} elevation={4}>
               <Text variant="titleMedium" style={styles.composerTitle}>Start new chat</Text>
@@ -186,7 +266,7 @@ export default function ChatsScreen({ navigation }) {
                 color={colors.onSurface}
               />
             </Surface>
-          </View>
+          </KeyboardAvoidingView>
         )}
       </Portal>
 
@@ -194,7 +274,8 @@ export default function ChatsScreen({ navigation }) {
         icon="plus" 
         style={[styles.fab, { bottom: Math.max(insets.bottom + 16, 20) }]} 
         color={colors.background} 
-        onPress={() => setShowComposer(true)} 
+        onPress={() => setShowComposer(true)}
+        accessibilityLabel="Start new chat"
       />
     </View>
   );
@@ -222,6 +303,38 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     marginTop: 2,
+  },
+  chatTime: {
+    color: colors.muted,
+    fontSize: 11,
+  },
+  chatRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  unreadBadge: {
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  unreadText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  searchBarContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  chatSearch: {
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    height: 44,
   },
   avatarContainer: {
     justifyContent: 'center',
