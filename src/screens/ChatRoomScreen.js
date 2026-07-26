@@ -383,10 +383,6 @@ export default function ChatRoomScreen({ route, navigation }) {
     }
   };
 
-  const onLongPressMessage = (item) => {
-    toggleSelect(item);
-  };
-
   const handleClearChat = () => {
     setShowChatMenuSheet(false);
     showAlert(
