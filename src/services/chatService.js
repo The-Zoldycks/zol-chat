@@ -309,9 +309,36 @@ export async function markChatAsRead(chatId, uid) {
     await updateDoc(chatRef, {
       [`participantMeta.${uid}.lastRead`]: new Date(),
     });
+    const msgsRef = collection(db, 'chats', chatId, 'messages');
+    const snap = await getDocs(msgsRef);
+    const updates = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data.senderId !== uid && data.status !== 'read') {
+        updates.push(updateDoc(doc(db, 'chats', chatId, 'messages', docSnap.id), { status: 'read' }));
+      }
+    });
+    await Promise.all(updates);
   } catch {
     // Chat may not exist yet
   }
+}
+
+export async function toggleMessageReaction(chatId, messageId, uid, emoji) {
+  const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
+  const snap = await getDoc(msgRef);
+  if (!snap.exists()) return;
+
+  const data = snap.data();
+  const reactions = { ...(data.reactions || {}) };
+
+  if (reactions[uid] === emoji) {
+    delete reactions[uid];
+  } else {
+    reactions[uid] = emoji;
+  }
+
+  await updateDoc(msgRef, { reactions });
 }
 
 export async function getUnreadCounts(uid, chats) {
@@ -388,6 +415,7 @@ export async function sendMessage(chatId, sender, text) {
     senderId: senderId,
     senderEmail: senderEmail,
     senderUsername: senderUsername,
+    status: 'sent',
     createdAt: serverTimestamp(),
   });
 
@@ -614,6 +642,7 @@ export async function sendImageMessage(chatId, sender, imageUrl) {
     senderId,
     senderEmail,
     senderUsername,
+    status: 'sent',
     createdAt: serverTimestamp(),
   });
 

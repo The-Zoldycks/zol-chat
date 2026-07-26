@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Avatar, Button, Card, IconButton, Switch, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +9,7 @@ import { showAlert } from '../components/AppAlert';
 
 export default function SettingsScreen() {
   const { user, profile, logout, updateUserProfile } = useAuth();
-  const { colors, isDark, toggleTheme, fontScale, updateFontScale } = useTheme();
+  const { colors, isDark, toggleTheme, fontScale, updateFontScale, scaleFont } = useTheme();
   const styles = useMemo(() => createStyles(colors, scaleFont), [colors, scaleFont]);
   const [username, setUsername] = useState('');
   const [photoURL, setPhotoURL] = useState('');
@@ -82,7 +82,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       <Card style={styles.card}>
         <Card.Content style={styles.content}>
           <View style={styles.avatarSection}>
@@ -197,16 +197,18 @@ export default function SettingsScreen() {
           </View>
         </Card.Content>
       </Card>
-    </View>
+    </ScrollView>
   );
 }
 
 const createStyles = (c, sf) => StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
     backgroundColor: c.background,
-    justifyContent: 'center',
+  },
+  scrollContent: {
+    padding: 20,
+    paddingVertical: 28,
   },
   card: {
     borderRadius: 24,

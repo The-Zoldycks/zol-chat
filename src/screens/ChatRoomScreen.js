@@ -2,14 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import { Avatar, IconButton, ActivityIndicator, Button, Checkbox, List, Modal, Portal, Surface, Text, TextInput } from 'react-native-paper';
+import { Avatar, IconButton, ActivityIndicator, Button, Checkbox, List, Modal, Portal, Searchbar, Surface, Text, TextInput } from 'react-native-paper';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { collection, doc, getDoc, getDocs, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { clearPresence, deleteMessage, forwardMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence, GLOBAL_CHAT_ID, purgeOldGlobalMessages, clearChatMessages, addGroupMembers, toggleGroupAdmin, leaveGroup } from '../services/chatService';
+import { useOnline } from '../context/OnlineContext';
+import { clearPresence, deleteMessage, forwardMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence, GLOBAL_CHAT_ID, purgeOldGlobalMessages, clearChatMessages, addGroupMembers, toggleGroupAdmin, leaveGroup, toggleMessageReaction } from '../services/chatService';
 import { uploadToCloudinary } from '../services/cloudinaryService';
 import EmojiPicker from '../components/EmojiPicker';
 import { showAlert } from '../components/AppAlert';
@@ -22,6 +23,8 @@ const senderObjFromProfile = (profile, user) => ({
 });
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+const QUICK_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥', '🚀'];
+const STARTER_CHIPS = ['Hey there! 👋', "How's it going?", 'What are you working on?'];
 
 const LinkableText = ({ text, style }) => {
   if (!text) return null;
@@ -69,6 +72,7 @@ export default function ChatRoomScreen({ route, navigation }) {
   const { chatId, target } = route.params;
   const { user, profile } = useAuth();
   const { colors, scaleFont } = useTheme();
+  const { isOnline } = useOnline();
   const styles = useMemo(() => createStyles(colors, scaleFont), [colors, scaleFont]);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
@@ -90,14 +94,20 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [addingMembers, setAddingMembers] = useState(false);
   const [groupDocData, setGroupDocData] = useState(null);
 
+  // New UI/UX features state
+  const [showInChatSearch, setShowInChatSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
+  const [lightboxUri, setLightboxUri] = useState(null);
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
+  const [reactionMsgItem, setReactionMsgItem] = useState(null);
+
   const [infoBar, setInfoBar] = useState(null);
   const infoBarTimeout = useRef(null);
   const infoBarAnim = useRef(new Animated.Value(0)).current;
   const listRef = useRef(null);
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
-  const typingTimeoutRef = useRef(null);
-  const botCooldownRef = useRef(null);
 
   const currentUid = user?.uid || profile?.uid;
   const isGroup = target?.isGroup || chatId.startsWith('group_');
@@ -136,6 +146,27 @@ export default function ChatRoomScreen({ route, navigation }) {
     infoBarTimeout.current = setTimeout(() => {
       Animated.timing(infoBarAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setInfoBar(null));
     }, 3000);
+  };
+
+  // In-chat search matching indices
+  const matchingMsgIndices = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const term = searchQuery.toLowerCase();
+    const indices = [];
+    messages.forEach((m, i) => {
+      if (m.text && m.text.toLowerCase().includes(term)) {
+        indices.push(i);
+      }
+    });
+    return indices;
+  }, [messages, searchQuery]);
+
+  const scrollToMatch = (idx) => {
+    if (matchingMsgIndices.length > 0 && idx >= 0 && idx < matchingMsgIndices.length) {
+      setCurrentMatchIdx(idx);
+      const msgIndex = matchingMsgIndices[idx];
+      listRef.current?.scrollToIndex({ index: msgIndex, animated: true, viewPosition: 0.5 });
+    }
   };
 
   useEffect(() => {
@@ -188,7 +219,7 @@ export default function ChatRoomScreen({ route, navigation }) {
     } else {
       navigation.setOptions({
         headerTitle: () => (
-          <View style={styles.headerTitleContainer}>
+          <Pressable onPress={() => setShowProfileSheet(true)} style={styles.headerTitleContainer}>
             {target?.uid === 'zolbot' ? (
               <Avatar.Image source={require('../../assets/zolbot.jpg')} size={34} />
             ) : isGlobal ? (
@@ -237,20 +268,28 @@ export default function ChatRoomScreen({ route, navigation }) {
                   : target?.email || ''}
               </Text>
             </View>
-          </View>
+          </Pressable>
         ),
         headerLeft: undefined,
         headerRight: () => (
-          <IconButton
-            icon="dots-vertical"
-            iconColor={colors.onSurface}
-            size={22}
-            onPress={() => setShowChatMenuSheet(true)}
-          />
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <IconButton
+              icon="magnify"
+              iconColor={showInChatSearch ? colors.primary : colors.onSurface}
+              size={22}
+              onPress={() => setShowInChatSearch((prev) => !prev)}
+            />
+            <IconButton
+              icon="dots-vertical"
+              iconColor={colors.onSurface}
+              size={22}
+              onPress={() => setShowChatMenuSheet(true)}
+            />
+          </View>
         ),
       });
     }
-  }, [navigation, target, partnerPresence, selectedMessages, user, profile, colors, isGroup, isGlobal, groupDocData]);
+  }, [navigation, target, partnerPresence, selectedMessages, user, profile, colors, isGroup, isGlobal, groupDocData, showInChatSearch]);
 
   useEffect(() => {
     const unsubscribe = subscribeToMessages(chatId, setMessages);
@@ -484,24 +523,33 @@ export default function ChatRoomScreen({ route, navigation }) {
     }
   };
 
-  const confirmDelete = (item) => {
-    showAlert(
-      'Delete message',
-      'Are you sure you want to delete this message?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteMessage(chatId, item.id);
-            } catch {
-              showAlert('Error', 'Failed to delete message.', [{ text: 'OK' }]);
-            }
-          },
-        },
-      ],
+
+
+  const onLongPressMessage = (item) => {
+    if (selectedMessages.length > 0) {
+      toggleSelect(item);
+    } else {
+      setReactionMsgItem(item);
+    }
+  };
+
+  const renderStatusBadge = (item) => {
+    if (item.senderId !== currentUid) return null;
+    let code = 'S';
+    let badgeColor = '#9E9E9E'; // Muted Gray for Sent
+
+    if (item.status === 'read') {
+      code = 'R';
+      badgeColor = '#4CAF50'; // Neon Green for Read
+    } else if (item.status === 'delivered' || partnerPresence) {
+      code = 'D';
+      badgeColor = '#FFC107'; // Amber Yellow for Delivered
+    }
+
+    return (
+      <Text style={[styles.receiptText, { color: badgeColor }]}>
+        {code}
+      </Text>
     );
   };
 
@@ -519,47 +567,140 @@ export default function ChatRoomScreen({ route, navigation }) {
         </Surface>
       )}
 
-      <FlatList
-        ref={listRef}
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        renderItem={({ item }) => {
-          const mine = item.senderId === currentUid;
-          return (
-            <Pressable
-              onLongPress={() => onLongPressMessage(item)}
-              onPress={() => { if (selectedMessages.length > 0) toggleSelect(item); }}
-              style={[styles.bubble, mine ? styles.mine : styles.theirs, selectedMessages.some((m) => m.id === item.id) && styles.selectedBubble]}
-            >
-              {item.imageUrl ? (
-                <View style={styles.imageContainer}>
-                  {loadingImages[item.id] !== false && (
-                    <ActivityIndicator style={styles.imageLoader} size="small" color={colors.primary} />
-                  )}
-                  <Image
-                    source={{ uri: item.imageUrl }}
-                    style={styles.messageImage}
-                    resizeMode="cover"
-                    onLoadStart={() => setLoadingImages((prev) => ({ ...prev, [item.id]: true }))}
-                    onLoadEnd={() => setLoadingImages((prev) => ({ ...prev, [item.id]: false }))}
-                  />
-                </View>
-              ) : null}
-              {item.text ? (
-                <LinkableText text={item.text} style={mine ? styles.mineText : styles.theirsText} />
-              ) : null}
-              <Text style={[styles.timeText, mine ? styles.mineTime : styles.theirsTime]}>
-                {formatTime(item.createdAt)}
-              </Text>
-            </Pressable>
-          );
-        }}
-      />
+      {showInChatSearch && (
+        <Surface style={styles.inChatSearchContainer} elevation={2}>
+          <Searchbar
+            placeholder="Search in chat..."
+            value={searchQuery}
+            onChangeText={(v) => { setSearchQuery(v); setCurrentMatchIdx(0); }}
+            style={styles.inChatSearchInput}
+            placeholderTextColor={colors.muted}
+            iconColor={colors.muted}
+            textColor={colors.onSurface}
+          />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+            <Text style={{ color: colors.muted, fontSize: 11 }}>
+              {matchingMsgIndices.length > 0 ? `${currentMatchIdx + 1}/${matchingMsgIndices.length}` : '0'}
+            </Text>
+            <IconButton
+              icon="chevron-up"
+              size={18}
+              disabled={matchingMsgIndices.length === 0}
+              onPress={() => scrollToMatch((currentMatchIdx - 1 + matchingMsgIndices.length) % matchingMsgIndices.length)}
+            />
+            <IconButton
+              icon="chevron-down"
+              size={18}
+              disabled={matchingMsgIndices.length === 0}
+              onPress={() => scrollToMatch((currentMatchIdx + 1) % matchingMsgIndices.length)}
+            />
+            <IconButton
+              icon="close"
+              size={18}
+              onPress={() => { setShowInChatSearch(false); setSearchQuery(''); }}
+            />
+          </View>
+        </Surface>
+      )}
+
+      {messages.length === 0 ? (
+        <View style={styles.emptyWelcomeContainer}>
+          <Avatar.Icon size={64} icon="chat-outline" style={{ backgroundColor: colors.primary + '20' }} color={colors.primary} />
+          <Text style={styles.emptyWelcomeTitle}>
+            Say hello to {target?.username || target?.groupName || 'this chat'} 👋
+          </Text>
+          <Text style={styles.emptyWelcomeSubtitle}>Start a private conversation or send a quick starter below:</Text>
+          <View style={styles.starterChipsContainer}>
+            {STARTER_CHIPS.map((chip, idx) => (
+              <Pressable
+                key={idx}
+                style={[styles.starterChip, { backgroundColor: colors.surfaceVariant }]}
+                onPress={() => {
+                  setText(chip);
+                  sendMessage(chatId, profile || user, chip);
+                }}
+              >
+                <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 13 }}>{chip}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item, index }) => {
+            const mine = item.senderId === currentUid;
+            const isMatch = matchingMsgIndices.includes(index);
+            const reactionsMap = item.reactions || {};
+            const groupedReactionsMap = {};
+            Object.values(reactionsMap).forEach((emoji) => {
+              groupedReactionsMap[emoji] = (groupedReactionsMap[emoji] || 0) + 1;
+            });
+            const groupedReactions = Object.entries(groupedReactionsMap);
+
+            return (
+              <View style={{ marginVertical: 4 }}>
+                <Pressable
+                  onLongPress={() => onLongPressMessage(item)}
+                  onPress={() => { if (selectedMessages.length > 0) toggleSelect(item); }}
+                  style={[
+                    styles.bubble,
+                    mine ? styles.mine : styles.theirs,
+                    selectedMessages.some((m) => m.id === item.id) && styles.selectedBubble,
+                    isMatch && { borderWidth: 2, borderColor: '#FF9800' },
+                  ]}
+                >
+                  {item.imageUrl ? (
+                    <Pressable style={styles.imageContainer} onPress={() => setLightboxUri(item.imageUrl)}>
+                      {loadingImages[item.id] !== false && (
+                        <ActivityIndicator style={styles.imageLoader} size="small" color={colors.primary} />
+                      )}
+                      <Image
+                        source={{ uri: item.imageUrl }}
+                        style={styles.messageImage}
+                        resizeMode="cover"
+                        onLoadStart={() => setLoadingImages((prev) => ({ ...prev, [item.id]: true }))}
+                        onLoadEnd={() => setLoadingImages((prev) => ({ ...prev, [item.id]: false }))}
+                      />
+                    </Pressable>
+                  ) : null}
+                  {item.text ? (
+                    <LinkableText text={item.text} style={mine ? styles.mineText : styles.theirsText} />
+                  ) : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 4, marginTop: 4 }}>
+                    <Text style={[styles.timeText, mine ? styles.mineTime : styles.theirsTime]}>
+                      {formatTime(item.createdAt)}
+                    </Text>
+                    {mine ? renderStatusBadge(item) : null}
+                  </View>
+                </Pressable>
+
+                {/* Reaction Badges */}
+                {groupedReactions.length > 0 && (
+                  <View style={[styles.reactionsRow, mine ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }]}>
+                    {groupedReactions.map(([emoji, count]) => (
+                      <Pressable
+                        key={emoji}
+                        style={[styles.reactionBadge, { backgroundColor: colors.surfaceVariant }]}
+                        onPress={() => toggleMessageReaction(chatId, item.id, currentUid, emoji)}
+                      >
+                        <Text style={{ fontSize: 12, color: colors.onSurface }}>{emoji} {count > 1 ? count : ''}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          }}
+        />
+      )}
 
       {showEmoji && (
         <EmojiPicker
@@ -849,6 +990,113 @@ export default function ChatRoomScreen({ route, navigation }) {
             style={styles.forwardSendBtn}
           />
         </Modal>
+
+        {/* Fullscreen Image Lightbox */}
+        {Boolean(lightboxUri) && (
+          <Modal visible={Boolean(lightboxUri)} onDismiss={() => setLightboxUri(null)} contentContainerStyle={styles.lightboxContainer}>
+            <Pressable style={styles.lightboxBackdrop} onPress={() => setLightboxUri(null)}>
+              <Image source={{ uri: lightboxUri }} style={styles.lightboxImage} resizeMode="contain" />
+              <View style={styles.lightboxHeaderActions}>
+                <IconButton icon="close" iconColor="#FFFFFF" size={28} onPress={() => setLightboxUri(null)} />
+              </View>
+            </Pressable>
+          </Modal>
+        )}
+
+        {/* Profile Details Sheet */}
+        {showProfileSheet && (
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <Pressable style={styles.backdrop} onPress={() => setShowProfileSheet(false)} />
+            <Surface style={styles.profileSheet} elevation={5}>
+              <View style={styles.sheetHandle} />
+              <View style={{ alignItems: 'center', marginVertical: 12, gap: 8 }}>
+                {target?.uid === 'zolbot' ? (
+                  <Avatar.Image source={require('../../assets/zolbot.jpg')} size={90} />
+                ) : isGlobal ? (
+                  <Avatar.Text size={90} label="🌍" style={{ backgroundColor: colors.primary + '30' }} labelStyle={{ fontSize: 44 }} />
+                ) : isGroup ? (
+                  <Avatar.Text size={90} label={(target?.username || target?.groupName || 'GP').slice(0, 2).toUpperCase()} style={{ backgroundColor: colors.secondary + '30' }} labelStyle={{ fontSize: 36, color: colors.secondary, fontWeight: 'bold' }} />
+                ) : target?.photoURL ? (
+                  <Avatar.Image source={{ uri: target.photoURL }} size={90} />
+                ) : (
+                  <Avatar.Text size={90} label={(target?.username || target?.email || '?').slice(0, 2).toUpperCase()} style={{ backgroundColor: colors.surfaceVariant }} labelStyle={{ fontSize: 32, color: colors.primary }} />
+                )}
+                <Text style={{ fontSize: 20, fontWeight: '700', color: colors.onSurface }}>
+                  {target?.groupName || target?.username || target?.email || 'Unknown User'}
+                </Text>
+                <Text style={{ fontSize: 13, color: colors.muted }}>
+                  {isGlobal ? 'Public Global Chat' : isGroup ? `${(groupDocData?.participants || target?.participants || []).length} members` : target?.email || ''}
+                </Text>
+                {!isGroup && !isGlobal && target?.uid !== 'zolbot' && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: isOnline(target?.uid) ? '#4CAF50' : colors.muted }} />
+                    <Text style={{ fontSize: 12, color: isOnline(target?.uid) ? '#4CAF50' : colors.muted, fontWeight: '600' }}>
+                      {isOnline(target?.uid) ? 'Online' : 'Offline'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <Button mode="contained" onPress={() => setShowProfileSheet(false)} style={{ borderRadius: 12, marginTop: 12, backgroundColor: colors.primary }}>
+                Close
+              </Button>
+            </Surface>
+          </KeyboardAvoidingView>
+        )}
+
+        {/* Quick Reaction Popover Sheet */}
+        {reactionMsgItem && (
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <Pressable style={styles.backdrop} onPress={() => setReactionMsgItem(null)} />
+            <Surface style={styles.reactionPopoverSheet} elevation={5}>
+              <Text style={{ textAlign: 'center', color: colors.muted, fontSize: 12, marginBottom: 8 }}>React to message:</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 8 }}>
+                {QUICK_EMOJIS.map((emoji) => (
+                  <Pressable
+                    key={emoji}
+                    onPress={() => {
+                      toggleMessageReaction(chatId, reactionMsgItem.id, currentUid, emoji);
+                      setReactionMsgItem(null);
+                    }}
+                    style={{ padding: 8 }}
+                  >
+                    <Text style={{ fontSize: 28 }}>{emoji}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={{ height: 1, backgroundColor: colors.surfaceVariant, marginVertical: 8 }} />
+              <List.Item
+                title="Copy Text"
+                left={(props) => <List.Icon {...props} icon="content-copy" color={colors.onSurface} />}
+                onPress={() => {
+                  if (reactionMsgItem.text) Clipboard.setStringAsync(reactionMsgItem.text);
+                  setReactionMsgItem(null);
+                }}
+                titleStyle={{ color: colors.onSurface }}
+              />
+              <List.Item
+                title="Forward Message"
+                left={(props) => <List.Icon {...props} icon="share-outline" color={colors.onSurface} />}
+                onPress={() => {
+                  startForward(reactionMsgItem);
+                  setReactionMsgItem(null);
+                }}
+                titleStyle={{ color: colors.onSurface }}
+              />
+              {reactionMsgItem.senderId === currentUid && (
+                <List.Item
+                  title="Delete Message"
+                  left={(props) => <List.Icon {...props} icon="delete-outline" color={colors.danger} />}
+                  onPress={() => {
+                    deleteMessage(chatId, reactionMsgItem.id).catch(() => {});
+                    setReactionMsgItem(null);
+                  }}
+                  titleStyle={{ color: colors.danger, fontWeight: '600' }}
+                />
+              )}
+            </Surface>
+          </KeyboardAvoidingView>
+        )}
       </Portal>
 
       {infoBar && (
@@ -1082,5 +1330,116 @@ const createStyles = (c, sf) => StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 12,
+  },
+  receiptText: {
+    fontSize: sf(10),
+    fontWeight: '800',
+    marginLeft: 2,
+  },
+  inChatSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: c.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: c.surfaceVariant,
+  },
+  inChatSearchInput: {
+    flex: 1,
+    height: 38,
+    backgroundColor: c.background,
+    borderRadius: 12,
+  },
+  emptyWelcomeContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    gap: 12,
+  },
+  emptyWelcomeTitle: {
+    fontSize: sf(18),
+    fontWeight: '700',
+    color: c.onSurface,
+    textAlign: 'center',
+  },
+  emptyWelcomeSubtitle: {
+    fontSize: sf(13),
+    color: c.muted,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  starterChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  starterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: c.surfaceVariant,
+  },
+  reactionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 2,
+    marginHorizontal: 4,
+  },
+  reactionBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: c.surfaceVariant,
+  },
+  lightboxContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+    margin: 0,
+    padding: 0,
+  },
+  lightboxBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '80%',
+  },
+  lightboxHeaderActions: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+  },
+  profileSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: c.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    borderTopWidth: 1,
+    borderColor: c.surfaceVariant,
+  },
+  reactionPopoverSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: c.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 16,
+    borderTopWidth: 1,
+    borderColor: c.surfaceVariant,
   },
 });
