@@ -38,7 +38,7 @@ export function OnlineProvider({ children }) {
               }));
             }
           });
-        });
+        }, () => {});
         unsubscribes.push(unsubPresence);
       });
     });

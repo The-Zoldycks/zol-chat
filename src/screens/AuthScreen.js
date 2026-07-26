@@ -6,7 +6,7 @@ import { useTheme } from '../context/ThemeContext';
 
 const formatAuthError = (err) => {
   if (!err) return '';
-  const message = err.message || String(err);
+  const message = err?.message || String(err);
   if (message.includes('auth/invalid-email')) return 'Please enter a valid email address.';
   if (message.includes('auth/user-not-found') || message.includes('auth/wrong-password') || message.includes('auth/invalid-credential')) {
     return 'Invalid email or password. Please try again.';

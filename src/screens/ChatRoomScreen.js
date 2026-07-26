@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import { Avatar, IconButton, ActivityIndicator, List, Modal, Portal, Surface, Text, TextInput } from 'react-native-paper';
+import { Avatar, IconButton, ActivityIndicator, Button, Checkbox, List, Modal, Portal, Surface, Text, TextInput } from 'react-native-paper';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { clearPresence, deleteMessage, forwardMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence } from '../services/chatService';
+import { clearPresence, deleteMessage, forwardMessage, markChatAsRead, sendImageMessage, sendMessage, setTyping, subscribeToMessages, subscribeToPresence, GLOBAL_CHAT_ID, purgeOldGlobalMessages, clearChatMessages, addGroupMembers, toggleGroupAdmin, leaveGroup } from '../services/chatService';
 import { uploadToCloudinary } from '../services/cloudinaryService';
 import EmojiPicker from '../components/EmojiPicker';
+import { showAlert } from '../components/AppAlert';
 
 const senderObjFromProfile = (profile, user) => ({
   uid: profile?.uid || user?.uid,
@@ -66,8 +68,8 @@ const formatTime = (timestamp) => {
 export default function ChatRoomScreen({ route, navigation }) {
   const { chatId, target } = route.params;
   const { user, profile } = useAuth();
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors, scaleFont } = useTheme();
+  const styles = useMemo(() => createStyles(colors, scaleFont), [colors, scaleFont]);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -77,41 +79,178 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [loadingImages, setLoadingImages] = useState({});
   const [showForward, setShowForward] = useState(false);
   const [forwardTarget, setForwardTarget] = useState(null);
-  const [forwardItem, setForwardItem] = useState(null);
+  const [forwardItems, setForwardItems] = useState([]);
   const [chatList, setChatList] = useState([]);
+  const [selectedMessages, setSelectedMessages] = useState([]);
+  const [showChatMenuSheet, setShowChatMenuSheet] = useState(false);
+  const [showGroupMembersModal, setShowGroupMembersModal] = useState(false);
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false);
+  const [availableContactsToAdd, setAvailableContactsToAdd] = useState([]);
+  const [selectedNewMemberUids, setSelectedNewMemberUids] = useState([]);
+  const [addingMembers, setAddingMembers] = useState(false);
+  const [groupDocData, setGroupDocData] = useState(null);
+
+  const [infoBar, setInfoBar] = useState(null);
+  const infoBarTimeout = useRef(null);
+  const infoBarAnim = useRef(new Animated.Value(0)).current;
   const listRef = useRef(null);
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const typingTimeoutRef = useRef(null);
   const botCooldownRef = useRef(null);
 
+  const currentUid = user?.uid || profile?.uid;
+  const isGroup = target?.isGroup || chatId.startsWith('group_');
+  const isGlobal = target?.isGlobal || chatId === GLOBAL_CHAT_ID;
+
+  // Load group doc if group
+  useEffect(() => {
+    if (isGroup) {
+      getDoc(doc(db, 'chats', chatId)).then((snap) => {
+        if (snap.exists()) setGroupDocData(snap.data());
+      }).catch(() => {});
+    }
+  }, [isGroup, chatId, showChatMenuSheet, showGroupMembersModal, showAddMembersModal]);
+
+  const isAdmin = useMemo(() => {
+    if (!isGroup) return false;
+    const admins = groupDocData?.groupAdmins || target?.groupAdmins || [];
+    return admins.includes(currentUid);
+  }, [isGroup, groupDocData, target, currentUid]);
+
+  const toggleSelect = (item) => {
+    setSelectedMessages((prev) => {
+      const exists = prev.find((m) => m.id === item.id);
+      if (exists) return prev.filter((m) => m.id !== item.id);
+      return [...prev, item];
+    });
+  };
+
+  const clearSelection = () => setSelectedMessages([]);
+
+  const showInfoBar = (sender, time) => {
+    if (infoBarTimeout.current) clearTimeout(infoBarTimeout.current);
+    setInfoBar({ sender, time });
+    infoBarAnim.setValue(0);
+    Animated.timing(infoBarAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    infoBarTimeout.current = setTimeout(() => {
+      Animated.timing(infoBarAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setInfoBar(null));
+    }, 3000);
+  };
+
   useEffect(() => {
     const isTyping = partnerPresence && Object.values(partnerPresence).some((p) => p.typing);
-    navigation.setOptions({
-      headerTitle: () => (
-        <View style={styles.headerTitleContainer}>
-          {target?.uid === 'zolbot' ? (
-            <Avatar.Image source={require('../../assets/zolbot.jpg')} size={34} />
-          ) : target?.photoURL ? (
-            <Avatar.Image source={{ uri: target.photoURL }} size={34} />
-          ) : (
-            <Avatar.Text 
-              size={34} 
-              label={(target?.username || target?.email || '?').slice(0, 2).toUpperCase()} 
-              style={styles.headerAvatarBg}
-              labelStyle={styles.headerAvatarText}
-            />
-          )}
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerName} numberOfLines={1}>{target?.username || target?.email || 'Unknown'}</Text>
-            <Text style={styles.headerEmail} numberOfLines={1}>
-              {isTyping ? 'typing...' : target?.email || ''}
-            </Text>
+    if (selectedMessages.length > 0) {
+      const allMine = selectedMessages.every((m) => m.senderId === currentUid);
+      const hasText = selectedMessages.some((m) => m.text);
+      navigation.setOptions({
+        headerTitle: () => (
+          <Text style={[styles.headerSelectedTitle, { color: colors.onSurface }]}>{selectedMessages.length} selected</Text>
+        ),
+        headerLeft: () => (
+          <IconButton icon="close" iconColor={colors.onSurface} size={24} onPress={clearSelection} />
+        ),
+        headerRight: () => (
+          <View style={styles.headerActions}>
+            {hasText ? (
+              <IconButton icon="content-copy" iconColor={colors.onSurface} size={22} onPress={() => {
+                const text = selectedMessages.filter((m) => m.text).map((m) => m.text).join('\n');
+                Clipboard.setStringAsync(text);
+                clearSelection();
+              }} />
+            ) : null}
+            {selectedMessages.length === 1 ? (
+              <IconButton icon="information-outline" iconColor={colors.onSurface} size={22} onPress={() => {
+                const msg = selectedMessages[0];
+                const ts = msg.createdAt;
+                let dateStr = 'Unknown';
+                if (ts?.toDate) dateStr = ts.toDate().toLocaleString();
+                else if (ts?.seconds != null) dateStr = new Date(ts.seconds * 1000).toLocaleString();
+                else if (ts) dateStr = new Date(ts).toLocaleString();
+                showInfoBar(msg.senderUsername || 'Unknown', dateStr);
+                clearSelection();
+              }} />
+            ) : null}
+            {selectedMessages.length >= 1 ? (
+              <IconButton icon="share-outline" iconColor={colors.onSurface} size={22} onPress={() => { startForward(selectedMessages); clearSelection(); }} />
+            ) : null}
+            {allMine ? (
+              <IconButton icon="delete-outline" iconColor={colors.danger} size={22} onPress={() => {
+                selectedMessages.forEach((m) => {
+                  deleteMessage(chatId, m.id).catch(() => {});
+                });
+                clearSelection();
+              }} />
+            ) : null}
           </View>
-        </View>
-      ),
-    });
-  }, [navigation, target, partnerPresence]);
+        ),
+      });
+    } else {
+      navigation.setOptions({
+        headerTitle: () => (
+          <View style={styles.headerTitleContainer}>
+            {target?.uid === 'zolbot' ? (
+              <Avatar.Image source={require('../../assets/zolbot.jpg')} size={34} />
+            ) : isGlobal ? (
+              <Avatar.Text
+                size={34}
+                label="🌍"
+                style={[styles.headerAvatarBg, { backgroundColor: colors.primary + '30' }]}
+                labelStyle={{ fontSize: 18 }}
+              />
+            ) : isGroup ? (
+              <Avatar.Text
+                size={34}
+                label={(target?.username || target?.groupName || 'GP').slice(0, 2).toUpperCase()}
+                style={[styles.headerAvatarBg, { backgroundColor: colors.secondary + '30' }]}
+                labelStyle={{ fontSize: 16, color: colors.secondary, fontWeight: 'bold' }}
+              />
+            ) : target?.photoURL ? (
+              <Avatar.Image source={{ uri: target.photoURL }} size={34} />
+            ) : (
+              <Avatar.Text
+                size={34}
+                label={(target?.username || target?.email || '?').slice(0, 2).toUpperCase()}
+                style={styles.headerAvatarBg}
+                labelStyle={styles.headerAvatarText}
+              />
+            )}
+            <View style={styles.headerTextContainer}>
+              <Text
+                style={[
+                  styles.headerName,
+                  target?.uid === 'zolbot' && { color: colors.primary, fontStyle: 'italic' },
+                  isGlobal && { color: '#4CAF50', fontWeight: '800' },
+                  isGroup && { color: colors.secondary, fontWeight: '700' },
+                ]}
+                numberOfLines={1}
+              >
+                {target?.groupName || target?.username || target?.email || 'Unknown'}
+              </Text>
+              <Text style={styles.headerEmail} numberOfLines={1}>
+                {isTyping
+                  ? 'typing...'
+                  : isGlobal
+                  ? 'Messages auto-delete after 72h ⏳'
+                  : isGroup
+                  ? `${(groupDocData?.participants || target?.participants || []).length} members`
+                  : target?.email || ''}
+              </Text>
+            </View>
+          </View>
+        ),
+        headerLeft: undefined,
+        headerRight: () => (
+          <IconButton
+            icon="dots-vertical"
+            iconColor={colors.onSurface}
+            size={22}
+            onPress={() => setShowChatMenuSheet(true)}
+          />
+        ),
+      });
+    }
+  }, [navigation, target, partnerPresence, selectedMessages, user, profile, colors, isGroup, isGlobal, groupDocData]);
 
   useEffect(() => {
     const unsubscribe = subscribeToMessages(chatId, setMessages);
@@ -125,15 +264,15 @@ export default function ChatRoomScreen({ route, navigation }) {
 
   useEffect(() => {
     const uid = profile?.uid || user?.uid;
-    if (!uid || target?.uid === 'zolbot') return;
+    if (!uid || target?.uid === 'zolbot' || target?.isGlobal) return;
     const unsubscribe = subscribeToPresence(chatId, uid, setPartnerPresence);
     return unsubscribe;
-  }, [chatId, profile?.uid, user?.uid, target?.uid]);
+  }, [chatId, profile?.uid, user?.uid, target?.uid, target?.isGlobal]);
 
   useEffect(() => {
     return () => {
       const uid = profile?.uid || user?.uid;
-      if (uid && target?.uid !== 'zolbot') {
+      if (uid && target?.uid !== 'zolbot' && !target?.isGlobal) {
         setTyping(chatId, uid, false);
         clearPresence(chatId, uid);
       }
@@ -144,7 +283,7 @@ export default function ChatRoomScreen({ route, navigation }) {
   const onTextChange = (value) => {
     setText(value);
     const uid = profile?.uid || user?.uid;
-    if (!uid || target?.uid === 'zolbot') return;
+    if (!uid || target?.uid === 'zolbot' || target?.isGlobal) return;
     setTyping(chatId, uid, value.length > 0);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     if (value.length > 0) {
@@ -158,7 +297,7 @@ export default function ChatRoomScreen({ route, navigation }) {
     const messageText = text.trim();
     if (!messageText || sending) return;
     if (target?.uid === 'zolbot' && botCooldown) {
-      Alert.alert('Please wait', 'Zolbot is still thinking. Try again in a few seconds.');
+      showAlert('Please wait', 'Zolbot is still thinking. Try again in a few seconds.', [{ text: 'OK' }]);
       return;
     }
 
@@ -172,8 +311,8 @@ export default function ChatRoomScreen({ route, navigation }) {
         if (botCooldownRef.current) clearTimeout(botCooldownRef.current);
         botCooldownRef.current = setTimeout(() => setBotCooldown(false), 5000);
       }
-    } catch {
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+    } catch (err) {
+      showAlert('Error', err?.message || 'Failed to send message. Please try again.', [{ text: 'OK' }]);
     } finally {
       setSending(false);
     }
@@ -182,7 +321,7 @@ export default function ChatRoomScreen({ route, navigation }) {
   const onSendImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please allow photo access to share images.');
+      showAlert('Permission needed', 'Please allow photo access to share images.', [{ text: 'OK' }]);
       return;
     }
 
@@ -199,30 +338,120 @@ export default function ChatRoomScreen({ route, navigation }) {
       const imageUrl = await uploadToCloudinary(imageUri);
       await sendImageMessage(chatId, senderObjFromProfile(profile, user), imageUrl);
     } catch {
-      Alert.alert('Error', 'Failed to send image. Please try again.');
+      showAlert('Error', 'Failed to send image. Please try again.', [{ text: 'OK' }]);
     } finally {
       setSending(false);
     }
   };
 
   const onLongPressMessage = (item) => {
-    const isMine = item.senderId === (user?.uid || profile?.uid);
-    const options = [
-      { text: 'Forward', onPress: () => startForward(item) },
-    ];
-    if (isMine) {
-      options.push({
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => confirmDelete(item),
-      });
-    }
-    options.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Message options', '', options);
+    toggleSelect(item);
   };
 
-  const startForward = async (item) => {
-    setForwardItem(item);
+  const handleClearChat = () => {
+    setShowChatMenuSheet(false);
+    showAlert(
+      'Clear Chat',
+      'Are you sure you want to clear all messages in this conversation? All messages will be permanently deleted from the database.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Chat',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearChatMessages(chatId);
+              showAlert('Success', 'Chat history cleared.', [{ text: 'OK' }]);
+            } catch {
+              showAlert('Error', 'Failed to clear chat.', [{ text: 'OK' }]);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleOpenAddMembers = async () => {
+    setShowChatMenuSheet(false);
+    setSelectedNewMemberUids([]);
+    try {
+      const chatsRef = collection(db, 'chats');
+      const q = query(chatsRef, where('participants', 'array-contains', currentUid));
+      const snapshot = await getDocs(q);
+      const existingParticipants = groupDocData?.participants || target?.participants || [];
+      const contactsMap = new Map();
+
+      if (!existingParticipants.includes('zolbot')) {
+        contactsMap.set('zolbot', {
+          uid: 'zolbot',
+          username: 'Zolbot 🤖',
+          email: 'zolbot@zoldyck.ai',
+        });
+      }
+
+      snapshot.docs.forEach((docSnap) => {
+        const cData = docSnap.data();
+        if (!cData.isGroup && !cData.isGlobal) {
+          const partnerId = cData.participants?.find((p) => p !== currentUid);
+          if (partnerId && !existingParticipants.includes(partnerId)) {
+            const meta = cData.participantMeta?.[partnerId] || {};
+            contactsMap.set(partnerId, {
+              uid: partnerId,
+              username: meta.username || meta.email || 'User',
+              email: meta.email || '',
+              photoURL: meta.photoURL || '',
+            });
+          }
+        }
+      });
+
+      setAvailableContactsToAdd(Array.from(contactsMap.values()));
+      setShowAddMembersModal(true);
+    } catch {
+      showAlert('Error', 'Could not load contacts to add.', [{ text: 'OK' }]);
+    }
+  };
+
+  const handleConfirmAddMembers = async () => {
+    if (selectedNewMemberUids.length === 0) return;
+    setAddingMembers(true);
+    try {
+      await addGroupMembers(chatId, selectedNewMemberUids);
+      setShowAddMembersModal(false);
+      setSelectedNewMemberUids([]);
+      showAlert('Success', 'Members added to group.', [{ text: 'OK' }]);
+    } catch {
+      showAlert('Error', 'Failed to add members.', [{ text: 'OK' }]);
+    } finally {
+      setAddingMembers(false);
+    }
+  };
+
+  const handleLeaveGroup = () => {
+    setShowChatMenuSheet(false);
+    showAlert(
+      'Leave Group',
+      'Are you sure you want to leave this group?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await leaveGroup(chatId, currentUid);
+              navigation.goBack();
+            } catch {
+              showAlert('Error', 'Failed to leave group.', [{ text: 'OK' }]);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const startForward = async (items) => {
+    setForwardItems(Array.isArray(items) ? items : [items]);
     setShowForward(true);
     try {
       const uid = user?.uid || profile?.uid;
@@ -237,24 +466,26 @@ export default function ChatRoomScreen({ route, navigation }) {
   };
 
   const confirmForward = async () => {
-    if (!forwardTarget || !forwardItem) return;
+    if (!forwardTarget || !forwardItems.length) return;
     try {
       const senderObj = senderObjFromProfile(profile, user);
-      await forwardMessage(forwardTarget.id, senderObj, forwardItem.text, forwardItem.imageUrl);
+      for (const item of forwardItems) {
+        await forwardMessage(forwardTarget.id, senderObj, item.text, item.imageUrl);
+      }
       const partnerId = forwardTarget.participants?.find((p) => p !== (user?.uid || profile?.uid));
       const partnerName = forwardTarget.participantMeta?.[partnerId]?.username || 'chat';
-      Alert.alert('Sent', `Message forwarded to ${partnerName}.`);
+      showAlert('Sent', `${forwardItems.length} message${forwardItems.length > 1 ? 's' : ''} forwarded to ${partnerName}.`, [{ text: 'OK' }]);
     } catch {
-      Alert.alert('Error', 'Failed to forward message.');
+      showAlert('Error', 'Failed to forward message.', [{ text: 'OK' }]);
     } finally {
       setShowForward(false);
       setForwardTarget(null);
-      setForwardItem(null);
+      setForwardItems([]);
     }
   };
 
   const confirmDelete = (item) => {
-    Alert.alert(
+    showAlert(
       'Delete message',
       'Are you sure you want to delete this message?',
       [
@@ -266,7 +497,7 @@ export default function ChatRoomScreen({ route, navigation }) {
             try {
               await deleteMessage(chatId, item.id);
             } catch {
-              Alert.alert('Error', 'Failed to delete message.');
+              showAlert('Error', 'Failed to delete message.', [{ text: 'OK' }]);
             }
           },
         },
@@ -278,8 +509,16 @@ export default function ChatRoomScreen({ route, navigation }) {
     <KeyboardAvoidingView 
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+      keyboardVerticalOffset={headerHeight}
     >
+      {isGlobal && (
+        <Surface style={styles.globalNoticeBanner} elevation={1}>
+          <Text style={styles.globalNoticeText}>
+            ⏳ Messages in Global Chat automatically delete after 72 hours.
+          </Text>
+        </Surface>
+      )}
+
       <FlatList
         ref={listRef}
         style={styles.list}
@@ -287,12 +526,15 @@ export default function ChatRoomScreen({ route, navigation }) {
         data={messages}
         keyExtractor={(item) => item.id}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => {
-          const mine = item.senderId === (user?.uid || profile?.uid);
+          const mine = item.senderId === currentUid;
           return (
             <Pressable
               onLongPress={() => onLongPressMessage(item)}
-              style={[styles.bubble, mine ? styles.mine : styles.theirs]}
+              onPress={() => { if (selectedMessages.length > 0) toggleSelect(item); }}
+              style={[styles.bubble, mine ? styles.mine : styles.theirs, selectedMessages.some((m) => m.id === item.id) && styles.selectedBubble]}
             >
               {item.imageUrl ? (
                 <View style={styles.imageContainer}>
@@ -344,7 +586,7 @@ export default function ChatRoomScreen({ route, navigation }) {
           value={text} 
           onChangeText={onTextChange} 
           mode="outlined" 
-          placeholder={botCooldown ? 'Zolbot is thinking...' : 'Message...'}
+          placeholder={botCooldown ? 'Zolbot is thinking...' : isGlobal ? 'Message everyone...' : 'Message...'}
           placeholderTextColor={colors.muted}
           style={styles.input} 
           activeOutlineColor={colors.primary}
@@ -368,8 +610,216 @@ export default function ChatRoomScreen({ route, navigation }) {
       </View>
 
       <Portal>
-        <Modal visible={showForward} onDismiss={() => { setShowForward(false); setForwardTarget(null); setForwardItem(null); }} contentContainerStyle={styles.forwardModal}>
-          <Text style={styles.forwardTitle}>Forward to...</Text>
+        {/* 3-Dot Options Bottom Sheet */}
+        {showChatMenuSheet && (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="box-none"
+          >
+            <Pressable style={styles.backdrop} onPress={() => setShowChatMenuSheet(false)} />
+            <Surface style={styles.menuSheet} elevation={5}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.menuSheetTitle}>
+                {isGroup ? (target?.groupName || 'Group Options') : (target?.username || target?.email || 'Chat Options')}
+              </Text>
+
+              {isGlobal ? (
+                <Text style={{ color: colors.muted, textAlign: 'center', marginVertical: 12, fontSize: 13 }}>
+                  Global Chat: All messages are public and auto-delete after 72 hours.
+                </Text>
+              ) : null}
+
+              {isGroup ? (
+                <>
+                  <List.Item
+                    title="View Members"
+                    left={(props) => <List.Icon {...props} icon="account-group-outline" color={colors.onSurface} />}
+                    onPress={() => { setShowChatMenuSheet(false); setShowGroupMembersModal(true); }}
+                    titleStyle={{ color: colors.onSurface }}
+                  />
+                  {isAdmin ? (
+                    <List.Item
+                      title="Add Members"
+                      left={(props) => <List.Icon {...props} icon="account-plus-outline" color={colors.primary} />}
+                      onPress={handleOpenAddMembers}
+                      titleStyle={{ color: colors.primary, fontWeight: '600' }}
+                    />
+                  ) : null}
+                  <List.Item
+                    title="Clear Chat"
+                    left={(props) => <List.Icon {...props} icon="broom" color={colors.danger} />}
+                    onPress={handleClearChat}
+                    titleStyle={{ color: colors.danger, fontWeight: '600' }}
+                  />
+                  <List.Item
+                    title="Leave Group"
+                    left={(props) => <List.Icon {...props} icon="exit-to-app" color={colors.danger} />}
+                    onPress={handleLeaveGroup}
+                    titleStyle={{ color: colors.danger, fontWeight: '600' }}
+                  />
+                </>
+              ) : (
+                <List.Item
+                  title="Clear Chat"
+                  left={(props) => <List.Icon {...props} icon="broom" color={colors.danger} />}
+                  onPress={handleClearChat}
+                  titleStyle={{ color: colors.danger, fontWeight: '600' }}
+                />
+              )}
+
+              <Button
+                mode="outlined"
+                onPress={() => setShowChatMenuSheet(false)}
+                style={{ marginTop: 12, borderRadius: 12, borderColor: colors.surfaceVariant }}
+                textColor={colors.onSurface}
+              >
+                Close
+              </Button>
+            </Surface>
+          </KeyboardAvoidingView>
+        )}
+
+        {/* View Group Members Modal */}
+        {showGroupMembersModal && (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="box-none"
+          >
+            <Pressable style={styles.backdrop} onPress={() => setShowGroupMembersModal(false)} />
+            <Surface style={[styles.menuSheet, { maxHeight: '80%' }]} elevation={5}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.menuSheetTitle}>Group Members</Text>
+              <FlatList
+                data={groupDocData?.participants || target?.participants || []}
+                keyExtractor={(item) => item}
+                style={{ maxHeight: 280, marginTop: 8 }}
+                renderItem={({ item: memberUid }) => {
+                  const meta = groupDocData?.participantMeta?.[memberUid] || target?.participantMeta?.[memberUid] || {};
+                  const isMemberAdmin = (groupDocData?.groupAdmins || target?.groupAdmins || []).includes(memberUid);
+                  return (
+                    <List.Item
+                      title={meta.username || meta.email || (memberUid === 'zolbot' ? 'Zolbot 🤖' : 'User')}
+                      description={isMemberAdmin ? 'Admin' : 'Member'}
+                      titleStyle={{ color: colors.onSurface, fontWeight: '600' }}
+                      descriptionStyle={{ color: isMemberAdmin ? colors.primary : colors.muted }}
+                      left={() => (
+                        <View style={{ justifyContent: 'center', marginRight: 8 }}>
+                          {memberUid === 'zolbot' ? (
+                            <Avatar.Image source={require('../../assets/zolbot.jpg')} size={36} />
+                          ) : meta.photoURL ? (
+                            <Avatar.Image source={{ uri: meta.photoURL }} size={36} />
+                          ) : (
+                            <Avatar.Text
+                              size={36}
+                              label={(meta.username || '?').slice(0, 2).toUpperCase()}
+                              style={{ backgroundColor: colors.surfaceVariant }}
+                              labelStyle={{ fontSize: 14, color: colors.primary }}
+                            />
+                          )}
+                        </View>
+                      )}
+                      right={() => (
+                        isAdmin && memberUid !== currentUid && memberUid !== 'zolbot' ? (
+                          <Button
+                            mode="text"
+                            onPress={() => toggleGroupAdmin(chatId, memberUid, !isMemberAdmin)}
+                            textColor={isMemberAdmin ? colors.danger : colors.primary}
+                            labelStyle={{ fontSize: 12 }}
+                          >
+                            {isMemberAdmin ? 'Remove Admin' : 'Make Admin'}
+                          </Button>
+                        ) : null
+                      )}
+                    />
+                  );
+                }}
+              />
+              <Button
+                mode="contained"
+                onPress={() => setShowGroupMembersModal(false)}
+                style={{ borderRadius: 12, marginTop: 12, backgroundColor: colors.primary }}
+              >
+                Close
+              </Button>
+            </Surface>
+          </KeyboardAvoidingView>
+        )}
+
+        {/* Add Members Modal */}
+        {showAddMembersModal && (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="box-none"
+          >
+            <Pressable style={styles.backdrop} onPress={() => setShowAddMembersModal(false)} />
+            <Surface style={[styles.menuSheet, { maxHeight: '80%' }]} elevation={5}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.menuSheetTitle}>Add Members to Group</Text>
+              <FlatList
+                data={availableContactsToAdd}
+                keyExtractor={(item) => item.uid}
+                style={{ maxHeight: 260, marginTop: 8 }}
+                ListEmptyComponent={<Text style={{ color: colors.muted, textAlign: 'center', marginVertical: 16 }}>No contacts available to add.</Text>}
+                renderItem={({ item }) => {
+                  const selected = selectedNewMemberUids.includes(item.uid);
+                  return (
+                    <Pressable
+                      style={{ flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 8, backgroundColor: selected ? colors.primary + '20' : undefined }}
+                      onPress={() => {
+                        setSelectedNewMemberUids((prev) =>
+                          prev.includes(item.uid) ? prev.filter((id) => id !== item.uid) : [...prev, item.uid]
+                        );
+                      }}
+                    >
+                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        {item.uid === 'zolbot' ? (
+                          <Avatar.Image source={require('../../assets/zolbot.jpg')} size={36} />
+                        ) : item.photoURL ? (
+                          <Avatar.Image source={{ uri: item.photoURL }} size={36} />
+                        ) : (
+                          <Avatar.Text
+                            size={36}
+                            label={(item.username || '?').slice(0, 2).toUpperCase()}
+                            style={{ backgroundColor: colors.surfaceVariant }}
+                            labelStyle={{ fontSize: 14, color: colors.primary }}
+                          />
+                        )}
+                        <View>
+                          <Text style={{ color: colors.onSurface, fontWeight: '600' }}>{item.username}</Text>
+                          <Text style={{ color: colors.muted, fontSize: 11 }}>{item.email}</Text>
+                        </View>
+                      </View>
+                      <Checkbox.Android
+                        status={selected ? 'checked' : 'unchecked'}
+                        color={colors.primary}
+                        onPress={() => {
+                          setSelectedNewMemberUids((prev) =>
+                            prev.includes(item.uid) ? prev.filter((id) => id !== item.uid) : [...prev, item.uid]
+                          );
+                        }}
+                      />
+                    </Pressable>
+                  );
+                }}
+              />
+              <Button
+                mode="contained"
+                onPress={handleConfirmAddMembers}
+                loading={addingMembers}
+                disabled={addingMembers || selectedNewMemberUids.length === 0}
+                style={{ borderRadius: 12, marginTop: 12, backgroundColor: colors.primary }}
+              >
+                Add Selected ({selectedNewMemberUids.length})
+              </Button>
+            </Surface>
+          </KeyboardAvoidingView>
+        )}
+
+        <Modal visible={showForward} onDismiss={() => { setShowForward(false); setForwardTarget(null); setForwardItems([]); }} contentContainerStyle={styles.forwardModal}>
+          <Text style={styles.forwardTitle}>Forward {forwardItems.length > 1 ? `${forwardItems.length} messages` : 'message'} to...</Text>
           <FlatList
             data={chatList}
             keyExtractor={(item) => item.id}
@@ -393,18 +843,25 @@ export default function ChatRoomScreen({ route, navigation }) {
             icon="send"
             mode="contained"
             onPress={confirmForward}
-            disabled={!forwardTarget}
+            disabled={!forwardTarget || !forwardItems.length}
             containerColor={colors.primary}
             iconColor={colors.background}
             style={styles.forwardSendBtn}
           />
         </Modal>
       </Portal>
+
+      {infoBar && (
+        <Animated.View style={[styles.infoBar, { backgroundColor: colors.surfaceVariant, opacity: infoBarAnim, bottom: Math.max(insets.bottom, 12) + 60 }]}>
+          <Text style={[styles.infoBarTitle, { color: colors.onSurface }]}>{infoBar.sender}</Text>
+          <Text style={[styles.infoBarTime, { color: colors.muted }]}>{infoBar.time}</Text>
+        </Animated.View>
+      )}
     </KeyboardAvoidingView>
   );
 }
 
-const createStyles = (c) => StyleSheet.create({
+const createStyles = (c, sf) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: c.background,
@@ -429,24 +886,55 @@ const createStyles = (c) => StyleSheet.create({
   headerName: {
     color: c.onSurface,
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: sf(15),
   },
   headerEmail: {
     color: c.muted,
-    fontSize: 11,
+    fontSize: sf(11),
     maxWidth: 200,
+  },
+  headerSelectedTitle: {
+    fontSize: sf(17),
+    fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  infoBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  infoBarTitle: {
+    fontSize: sf(14),
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  infoBarTime: {
+    fontSize: sf(12),
   },
   list: {
     flex: 1,
   },
   listContent: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   bubble: {
     maxWidth: '75%',
     marginVertical: 4,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
     paddingHorizontal: 14,
     elevation: 1,
     alignSelf: 'flex-start',
@@ -458,12 +946,11 @@ const createStyles = (c) => StyleSheet.create({
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 4,
-    overflow: 'hidden',
   },
   mineText: {
     color: c.white,
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: sf(15),
+    lineHeight: sf(20),
   },
   theirs: {
     alignSelf: 'flex-start',
@@ -472,12 +959,15 @@ const createStyles = (c) => StyleSheet.create({
     borderTopRightRadius: 18,
     borderBottomLeftRadius: 4,
     borderBottomRightRadius: 18,
-    overflow: 'hidden',
   },
   theirsText: {
     color: c.onSurface,
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: sf(15),
+    lineHeight: sf(20),
+  },
+  selectedBubble: {
+    borderWidth: 2,
+    borderColor: c.primary,
   },
   messageImage: {
     width: 200,
@@ -498,7 +988,7 @@ const createStyles = (c) => StyleSheet.create({
     zIndex: 1,
   },
   timeText: {
-    fontSize: 9,
+    fontSize: sf(9),
     marginTop: 4,
     alignSelf: 'flex-end',
     fontWeight: '300',
@@ -532,18 +1022,65 @@ const createStyles = (c) => StyleSheet.create({
   },
   forwardTitle: {
     color: c.onSurface,
-    fontSize: 18,
+    fontSize: sf(18),
     fontWeight: '700',
     marginBottom: 12,
     textAlign: 'center',
   },
   forwardEmpty: {
     color: c.muted,
+    fontSize: sf(14),
     textAlign: 'center',
     marginTop: 24,
   },
   forwardSendBtn: {
     alignSelf: 'center',
     marginTop: 8,
+  },
+  globalNoticeBanner: {
+    backgroundColor: c.surfaceVariant,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: c.surfaceVariant,
+    alignItems: 'center',
+  },
+  globalNoticeText: {
+    color: '#4CAF50',
+    fontSize: sf(12),
+    fontWeight: '600',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  },
+  menuSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: c.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderColor: c.surfaceVariant,
+  },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: c.surfaceVariant,
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  menuSheetTitle: {
+    color: c.onSurface,
+    fontSize: sf(17),
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 12,
   },
 });

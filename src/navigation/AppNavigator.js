@@ -66,7 +66,7 @@ export default function AppNavigator() {
   const { colors, isDark } = useTheme();
 
   useEffect(() => {
-    if (user) registerForPushNotifications();
+    if (user) registerForPushNotifications().catch(() => {});
   }, [user]);
 
   const navTheme = {

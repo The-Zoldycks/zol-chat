@@ -35,6 +35,7 @@ export function AuthProvider({ children }) {
             uid: authUser.uid,
             email: authUser.email,
             username,
+            usernameLower: username.toLowerCase(),
             photoURL: authUser.photoURL || '',
             createdAt: serverTimestamp(),
           }, { merge: true });
@@ -69,6 +70,7 @@ export function AuthProvider({ children }) {
     const current = profileRef.current;
     const updates = {
       username: username || current?.username || '',
+      usernameLower: (username || current?.username || '').toLowerCase(),
       photoURL: photoURL || current?.photoURL || '',
     };
     await updateProfile(currentUser, { displayName: updates.username, photoURL: updates.photoURL });

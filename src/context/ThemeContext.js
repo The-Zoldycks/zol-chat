@@ -6,22 +6,41 @@ import { useEffect } from 'react';
 const ThemeContext = createContext();
 
 const THEME_KEY = 'app_theme_mode';
+const FONT_SIZE_KEY = 'app_font_scale';
+
+export const FONT_SCALES = [
+  { label: 'S', value: 0.85 },
+  { label: 'M', value: 1.0 },
+  { label: 'L', value: 1.15 },
+  { label: 'XL', value: 1.3 },
+];
 
 export function ThemeProvider({ children }) {
   const [isDark, setIsDark] = useState(true);
+  const [fontScale, setFontScale] = useState(1.0);
 
   useEffect(() => {
     AsyncStorage.getItem(THEME_KEY).then((val) => {
       if (val === 'light') setIsDark(false);
     });
+    AsyncStorage.getItem(FONT_SIZE_KEY).then((val) => {
+      if (val != null) {
+        const num = parseFloat(val);
+        if (!isNaN(num)) setFontScale(num);
+      }
+    });
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setIsDark((prev) => {
-      const next = !prev;
-      return next;
-    });
+    setIsDark((prev) => !prev);
   }, []);
+
+  const updateFontScale = useCallback((value) => {
+    setFontScale(value);
+    AsyncStorage.setItem(FONT_SIZE_KEY, String(value));
+  }, []);
+
+  const scaleFont = useCallback((base) => Math.round(base * fontScale), [fontScale]);
 
   useEffect(() => {
     AsyncStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
@@ -32,7 +51,10 @@ export function ThemeProvider({ children }) {
     toggleTheme,
     colors: isDark ? darkColors : lightColors,
     paperTheme: isDark ? darkTheme : lightTheme,
-  }), [isDark, toggleTheme]);
+    fontScale,
+    updateFontScale,
+    scaleFont,
+  }), [isDark, toggleTheme, fontScale, updateFontScale, scaleFont]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

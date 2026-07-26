@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Avatar, Button, Card, IconButton, Switch, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTheme, FONT_SCALES } from '../context/ThemeContext';
 import { uploadToCloudinary } from '../services/cloudinaryService';
+import { showAlert } from '../components/AppAlert';
 
 export default function SettingsScreen() {
   const { user, profile, logout, updateUserProfile } = useAuth();
-  const { colors, isDark, toggleTheme } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors, isDark, toggleTheme, fontScale, updateFontScale } = useTheme();
+  const styles = useMemo(() => createStyles(colors, scaleFont), [colors, scaleFont]);
   const [username, setUsername] = useState('');
   const [photoURL, setPhotoURL] = useState('');
   const [saving, setSaving] = useState(false);
@@ -26,7 +27,7 @@ export default function SettingsScreen() {
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please allow photo access to set profile image.');
+      showAlert('Permission needed', 'Please allow photo access to set profile image.', [{ text: 'OK' }]);
       return;
     }
 
@@ -44,9 +45,9 @@ export default function SettingsScreen() {
       const url = await uploadToCloudinary(imageUri);
       setPhotoURL(url);
       await updateUserProfile({ username: username.trim() || profile?.username, photoURL: url });
-      Alert.alert('Success', 'Profile photo updated successfully!');
+      showAlert('Success', 'Profile photo updated successfully!', [{ text: 'OK' }]);
     } catch (e) {
-      Alert.alert('Upload failed', e.message);
+      showAlert('Upload failed', e?.message || String(e), [{ text: 'OK' }]);
     } finally {
       setUploading(false);
       setSaving(false);
@@ -55,22 +56,22 @@ export default function SettingsScreen() {
 
   const onSave = async () => {
     if (!username.trim()) {
-      Alert.alert('Validation Error', 'Username cannot be empty.');
+      showAlert('Validation Error', 'Username cannot be empty.', [{ text: 'OK' }]);
       return;
     }
     setSaving(true);
     try {
       await updateUserProfile({ username: username.trim(), photoURL });
-      Alert.alert('Success', 'Profile updated successfully.');
+      showAlert('Success', 'Profile updated successfully.', [{ text: 'OK' }]);
     } catch (e) {
-      Alert.alert('Save failed', e.message);
+      showAlert('Save failed', e?.message || String(e), [{ text: 'OK' }]);
     } finally {
       setSaving(false);
     }
   };
 
   const onLogout = () => {
-    Alert.alert(
+    showAlert(
       'Log Out',
       'Are you sure you want to log out?',
       [
@@ -134,19 +135,6 @@ export default function SettingsScreen() {
             disabled={saving}
           />
 
-          <TextInput 
-            label="Profile Image URL (Optional)" 
-            value={photoURL} 
-            onChangeText={setPhotoURL} 
-            mode="outlined"
-            style={styles.input}
-            outlineColor={colors.outline}
-            activeOutlineColor={colors.primary}
-            textColor={colors.onSurface}
-            autoCapitalize="none"
-            disabled={saving}
-          />
-
           <Button 
             mode="contained" 
             onPress={onSave} 
@@ -176,13 +164,44 @@ export default function SettingsScreen() {
               color={colors.primary}
             />
           </View>
+
+          <View style={[styles.fontSizeRow, { borderTopColor: colors.surfaceVariant }]}>
+            <Text style={[styles.themeLabel, { color: colors.onSurface }]}>Font Size</Text>
+            <View style={styles.fontSizeOptions}>
+              {FONT_SCALES.map((opt) => (
+                <Pressable
+                  key={opt.label}
+                  onPress={() => updateFontScale(opt.value)}
+                  style={[
+                    styles.fontSizeBtn,
+                    {
+                      backgroundColor: fontScale === opt.value ? colors.primary : colors.background,
+                      borderColor: fontScale === opt.value ? colors.primary : colors.surfaceVariant,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.fontSizeBtnText,
+                      {
+                        color: fontScale === opt.value ? colors.background : colors.onSurface,
+                        fontSize: Math.round(13 * opt.value),
+                      },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
         </Card.Content>
       </Card>
     </View>
   );
 }
 
-const createStyles = (c) => StyleSheet.create({
+const createStyles = (c, sf) => StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
@@ -244,14 +263,14 @@ const createStyles = (c) => StyleSheet.create({
   },
   emailLabel: {
     color: c.muted,
-    fontSize: 11,
+    fontSize: sf(11),
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   emailValue: {
     color: c.onSurface,
-    fontSize: 15,
+    fontSize: sf(15),
     marginTop: 2,
     fontWeight: '500',
   },
@@ -265,7 +284,7 @@ const createStyles = (c) => StyleSheet.create({
     backgroundColor: c.primary,
   },
   btnLabel: {
-    fontSize: 15,
+    fontSize: sf(15),
     fontWeight: '600',
   },
   logoutBtn: {
@@ -280,7 +299,29 @@ const createStyles = (c) => StyleSheet.create({
     borderTopWidth: 1,
   },
   themeLabel: {
-    fontSize: 16,
+    fontSize: sf(16),
     fontWeight: '500',
+  },
+  fontSizeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 16,
+    borderTopWidth: 1,
+  },
+  fontSizeOptions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  fontSizeBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fontSizeBtnText: {
+    fontWeight: '600',
   },
 });
