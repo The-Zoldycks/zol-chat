@@ -14,5 +14,10 @@
   },
   "submit": {
     "production": {}
+  },
+  "update": {
+    "production": {
+      "branch": "production"
+    }
   }
 }

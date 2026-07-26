@@ -22,7 +22,8 @@ export async function registerForPushNotifications() {
     return null;
   }
 
-  const token = await Notifications.getExpoPushTokenAsync();
+  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID;
+  const token = await Notifications.getExpoPushTokenAsync({ projectId });
   return token.data;
 }
 

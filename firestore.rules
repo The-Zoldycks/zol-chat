@@ -24,6 +24,8 @@ service cloud.firestore {
           && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants || chatId == 'global_chat');
         allow create: if request.auth != null
           && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants || chatId == 'global_chat');
+        allow update: if request.auth != null
+          && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants || chatId == 'global_chat');
         allow delete: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
       }

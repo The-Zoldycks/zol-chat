@@ -430,12 +430,12 @@ export default function ChatsScreen({ navigation }) {
         {/* 1-on-1 User Search Sheet */}
         {showComposer && (
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={StyleSheet.absoluteFill}
             pointerEvents="box-none"
           >
             <Pressable style={styles.backdrop} onPress={closeComposer} />
-            <Surface style={styles.composer} elevation={4}>
+            <Surface style={styles.searchSheet} elevation={4}>
               <Text variant="titleMedium" style={styles.composerTitle}>Start new chat</Text>
               <Searchbar 
                 placeholder="Search by email or username" 
@@ -492,7 +492,7 @@ export default function ChatsScreen({ navigation }) {
         {/* Group Creation Sheet */}
         {showCreateGroup && (
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={StyleSheet.absoluteFill}
             pointerEvents="box-none"
           >
@@ -789,6 +789,19 @@ const createStyles = (c, sf) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.surfaceVariant,
     borderBottomWidth: 0,
+  },
+  searchSheet: {
+    position: 'absolute',
+    top: '15%',
+    left: 16,
+    right: 16,
+    maxHeight: '65%',
+    borderRadius: 28,
+    padding: 20,
+    gap: 16,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.surfaceVariant,
   },
   composerTitle: {
     color: c.onSurface,

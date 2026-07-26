@@ -106,6 +106,8 @@ export default function ChatRoomScreen({ route, navigation }) {
   const infoBarTimeout = useRef(null);
   const infoBarAnim = useRef(new Animated.Value(0)).current;
   const listRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const botCooldownRef = useRef(null);
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
 
@@ -532,14 +534,11 @@ export default function ChatRoomScreen({ route, navigation }) {
   const renderStatusBadge = (item) => {
     if (item.senderId !== currentUid) return null;
     let code = 'S';
-    let badgeColor = '#9E9E9E'; // Muted Gray for Sent
+    let badgeColor = '#9E9E9E';
 
     if (item.status === 'read') {
       code = 'R';
-      badgeColor = '#4CAF50'; // Neon Green for Read
-    } else if (item.status === 'delivered' || partnerPresence) {
-      code = 'D';
-      badgeColor = '#FFC107'; // Amber Yellow for Delivered
+      badgeColor = '#4CAF50';
     }
 
     return (
@@ -612,7 +611,6 @@ export default function ChatRoomScreen({ route, navigation }) {
                 key={idx}
                 style={[styles.starterChip, { backgroundColor: colors.surfaceVariant }]}
                 onPress={() => {
-                  setText(chip);
                   sendMessage(chatId, profile || user, chip);
                 }}
               >
@@ -992,7 +990,7 @@ export default function ChatRoomScreen({ route, navigation }) {
           <Modal visible={Boolean(lightboxUri)} onDismiss={() => setLightboxUri(null)} contentContainerStyle={styles.lightboxContainer}>
             <Pressable style={styles.lightboxBackdrop} onPress={() => setLightboxUri(null)}>
               <Image source={{ uri: lightboxUri }} style={styles.lightboxImage} resizeMode="contain" />
-              <View style={styles.lightboxHeaderActions}>
+              <View style={[styles.lightboxHeaderActions, { top: insets.top + 10 }]}>
                 <IconButton icon="close" iconColor="#FFFFFF" size={28} onPress={() => setLightboxUri(null)} />
               </View>
             </Pressable>
@@ -1061,6 +1059,15 @@ export default function ChatRoomScreen({ route, navigation }) {
                 ))}
               </View>
               <View style={{ height: 1, backgroundColor: colors.surfaceVariant, marginVertical: 8 }} />
+              <List.Item
+                title="Select Messages"
+                left={(props) => <List.Icon {...props} icon="selection-drag" color={colors.primary} />}
+                onPress={() => {
+                  setSelectedMessages([reactionMsgItem]);
+                  setReactionMsgItem(null);
+                }}
+                titleStyle={{ color: colors.primary, fontWeight: '600' }}
+              />
               <List.Item
                 title="Copy Text"
                 left={(props) => <List.Icon {...props} icon="content-copy" color={colors.onSurface} />}

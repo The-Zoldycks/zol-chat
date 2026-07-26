@@ -27,10 +27,6 @@ export async function uploadToCloudinary(imageUri) {
   const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
     method: 'POST',
     body: formData,
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'multipart/form-data',
-    },
   });
 
   const data = await response.json();

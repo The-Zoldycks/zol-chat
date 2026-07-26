@@ -18,16 +18,19 @@ export const FONT_SCALES = [
 export function ThemeProvider({ children }) {
   const [isDark, setIsDark] = useState(true);
   const [fontScale, setFontScale] = useState(1.0);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(THEME_KEY).then((val) => {
-      if (val === 'light') setIsDark(false);
-    });
-    AsyncStorage.getItem(FONT_SIZE_KEY).then((val) => {
-      if (val != null) {
-        const num = parseFloat(val);
+    Promise.all([
+      AsyncStorage.getItem(THEME_KEY),
+      AsyncStorage.getItem(FONT_SIZE_KEY),
+    ]).then(([themeVal, fontVal]) => {
+      if (themeVal === 'light') setIsDark(false);
+      if (fontVal != null) {
+        const num = parseFloat(fontVal);
         if (!isNaN(num)) setFontScale(num);
       }
+      setLoaded(true);
     });
   }, []);
 
@@ -43,8 +46,10 @@ export function ThemeProvider({ children }) {
   const scaleFont = useCallback((base) => Math.round(base * fontScale), [fontScale]);
 
   useEffect(() => {
-    AsyncStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
-  }, [isDark]);
+    if (loaded) {
+      AsyncStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
+    }
+  }, [isDark, loaded]);
 
   const value = useMemo(() => ({
     isDark,

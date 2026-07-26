@@ -10,6 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 import { OnlineProvider } from '../context/OnlineContext';
 import { UnreadProvider, useUnread } from '../context/UnreadContext';
 import { registerForPushNotifications } from '../services/notificationService';
+import { purgeOldMessages } from '../services/chatService';
 import { colors as defaultColors } from '../theme/theme';
 import AuthScreen from '../screens/AuthScreen';
 import ChatsScreen from '../screens/ChatsScreen';
@@ -66,7 +67,10 @@ export default function AppNavigator() {
   const { colors, isDark } = useTheme();
 
   useEffect(() => {
-    if (user) registerForPushNotifications().catch(() => {});
+    if (user) {
+      registerForPushNotifications().catch(() => {});
+      purgeOldMessages(user.uid).catch(() => {});
+    }
   }, [user]);
 
   const navTheme = {

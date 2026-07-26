@@ -6,7 +6,11 @@ export function UnreadProvider({ children }) {
   const [totalUnread, setTotalUnread] = useState(0);
 
   const updateTotal = useCallback((counts) => {
-    const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+    if (!counts || typeof counts !== 'object') {
+      setTotalUnread(0);
+      return;
+    }
+    const total = Object.values(counts).reduce((sum, n) => sum + (typeof n === 'number' ? n : 0), 0);
     setTotalUnread(total);
   }, []);
 

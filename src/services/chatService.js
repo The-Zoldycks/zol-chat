@@ -11,10 +11,13 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  transaction,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { cacheMessages, getCachedMessages, clearCachedMessages } from './localMessageCache';
 
 const chatsCollection = collection(db, 'chats');
 
@@ -55,6 +58,52 @@ export async function purgeOldGlobalMessages() {
     await Promise.all(deletePromises);
   } catch {
     // Purge fails silently if offline or rules block
+  }
+}
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+function getTimestampMs(createdAt) {
+  if (!createdAt) return 0;
+  if (createdAt.toDate) return createdAt.toDate().getTime();
+  if (createdAt?.seconds != null) return createdAt.seconds * 1000;
+  return new Date(createdAt).getTime() || 0;
+}
+
+export async function purgeOldMessages(uid) {
+  const cutoff = Date.now() - SEVEN_DAYS_MS;
+  try {
+    const chatsSnap = await getDocs(
+      query(chatsCollection, where('participants', 'array-contains', uid))
+    );
+
+    for (const chatDoc of chatsSnap.docs) {
+      const chatId = chatDoc.id;
+      if (chatId === GLOBAL_CHAT_ID) continue;
+
+      const batch = writeBatch(db);
+      let ops = 0;
+
+      const msgsSnap = await getDocs(
+        query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'), limit(100))
+      );
+
+      for (const msgDoc of msgsSnap.docs) {
+        const msgTs = getTimestampMs(msgDoc.data().createdAt);
+        if (msgTs > 0 && msgTs < cutoff) {
+          batch.delete(doc(db, 'chats', chatId, 'messages', msgDoc.id));
+          ops++;
+          if (ops >= 400) {
+            await batch.commit();
+            return;
+          }
+        }
+      }
+
+      if (ops > 0) await batch.commit();
+    }
+  } catch {
+    // Purge is best-effort
   }
 }
 
@@ -100,6 +149,9 @@ export async function findUsersByEmailOrUsername(term, currentUid) {
 export async function startOrOpenChat(currentUser, targetUser) {
   const chatId = chatIdFromUsers(currentUser.uid, targetUser.uid);
   const chatRef = doc(db, 'chats', chatId);
+  const existing = await getDoc(chatRef);
+  if (existing.exists()) return chatId;
+
   await setDoc(chatRef, {
     id: chatId,
     participants: [currentUser.uid, targetUser.uid],
@@ -118,7 +170,7 @@ export async function startOrOpenChat(currentUser, targetUser) {
     lastMessage: '',
     updatedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
-  }, { merge: true });
+  });
   return chatId;
 }
 
@@ -183,16 +235,23 @@ export async function createGroupChat({ groupName, participants, creator }) {
 export async function clearChatMessages(chatId) {
   const msgsRef = collection(db, 'chats', chatId, 'messages');
   const snap = await getDocs(msgsRef);
-  const deletePromises = [];
+  const batch = writeBatch(db);
+  let count = 0;
   snap.forEach((docSnap) => {
-    deletePromises.push(deleteDoc(doc(db, 'chats', chatId, 'messages', docSnap.id)));
+    batch.delete(doc(db, 'chats', chatId, 'messages', docSnap.id));
+    count++;
+    if (count % 500 === 0) {
+      batch.commit();
+    }
   });
-  await Promise.all(deletePromises);
+  if (count % 500 !== 0) await batch.commit();
 
   await updateDoc(doc(db, 'chats', chatId), {
     lastMessage: 'Chat cleared',
     updatedAt: serverTimestamp(),
   });
+
+  await clearCachedMessages(chatId);
 }
 
 export async function addGroupMembers(chatId, newMemberUids) {
@@ -283,19 +342,27 @@ export function subscribeToChats(uid, onData) {
 }
 
 export function subscribeToMessages(chatId, onData) {
+  let snapshotReceived = false;
+
+  if (chatId !== GLOBAL_CHAT_ID) {
+    getCachedMessages(chatId).then((cached) => {
+      if (!snapshotReceived && cached.length > 0) onData(cached);
+    });
+  }
+
   const messageQuery = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'));
   return onSnapshot(messageQuery, (snapshot) => {
+    snapshotReceived = true;
     let docs = snapshot.docs.map((messageDoc) => ({ id: messageDoc.id, ...messageDoc.data() }));
     if (chatId === GLOBAL_CHAT_ID) {
       const cutoff = Date.now() - 72 * 60 * 60 * 1000;
       docs = docs.filter((msg) => {
-        let ts = 0;
-        if (msg.createdAt?.toDate) ts = msg.createdAt.toDate().getTime();
-        else if (msg.createdAt?.seconds) ts = msg.createdAt.seconds * 1000;
-        else if (msg.createdAt) ts = new Date(msg.createdAt).getTime();
+        const ts = getTimestampMs(msg.createdAt);
         return !ts || ts >= cutoff;
       });
       purgeOldGlobalMessages().catch(() => {});
+    } else {
+      cacheMessages(chatId, docs);
     }
     onData(docs);
   }, () => {
@@ -310,15 +377,17 @@ export async function markChatAsRead(chatId, uid) {
       [`participantMeta.${uid}.lastRead`]: new Date(),
     });
     const msgsRef = collection(db, 'chats', chatId, 'messages');
-    const snap = await getDocs(msgsRef);
-    const updates = [];
+    const snap = await getDocs(query(msgsRef, orderBy('createdAt', 'desc'), limit(50)));
+    const batch = writeBatch(db);
+    let count = 0;
     snap.forEach((docSnap) => {
       const data = docSnap.data();
-      if (data.senderId !== uid && data.status !== 'read') {
-        updates.push(updateDoc(doc(db, 'chats', chatId, 'messages', docSnap.id), { status: 'read' }));
+      if (data.senderId !== uid && data.status !== 'read' && count < 20) {
+        batch.update(doc(db, 'chats', chatId, 'messages', docSnap.id), { status: 'read' });
+        count++;
       }
     });
-    await Promise.all(updates);
+    if (count > 0) await batch.commit();
   } catch {
     // Chat may not exist yet
   }
@@ -326,19 +395,21 @@ export async function markChatAsRead(chatId, uid) {
 
 export async function toggleMessageReaction(chatId, messageId, uid, emoji) {
   const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
-  const snap = await getDoc(msgRef);
-  if (!snap.exists()) return;
+  await transaction(db, async (txn) => {
+    const snap = await txn.get(msgRef);
+    if (!snap.exists()) return;
 
-  const data = snap.data();
-  const reactions = { ...(data.reactions || {}) };
+    const data = snap.data();
+    const reactions = { ...(data.reactions || {}) };
 
-  if (reactions[uid] === emoji) {
-    delete reactions[uid];
-  } else {
-    reactions[uid] = emoji;
-  }
+    if (reactions[uid] === emoji) {
+      delete reactions[uid];
+    } else {
+      reactions[uid] = emoji;
+    }
 
-  await updateDoc(msgRef, { reactions });
+    txn.update(msgRef, { reactions });
+  });
 }
 
 export async function getUnreadCounts(uid, chats) {
@@ -388,26 +459,29 @@ export async function sendMessage(chatId, sender, text) {
   const senderUsername = sender?.username || sender?.displayName || senderEmail || 'User';
 
   if (chatId.startsWith('zolbot__')) {
-    await setDoc(doc(db, 'chats', chatId), {
-      id: chatId,
-      participants: [senderId, 'zolbot'],
-      participantMeta: {
-        [senderId]: {
-          email: senderEmail,
-          username: senderUsername,
-          photoURL: sender?.photoURL || '',
+    const existingChat = await getDoc(doc(db, 'chats', chatId));
+    if (!existingChat.exists()) {
+      await setDoc(doc(db, 'chats', chatId), {
+        id: chatId,
+        participants: [senderId, 'zolbot'],
+        participantMeta: {
+          [senderId]: {
+            email: senderEmail,
+            username: senderUsername,
+            photoURL: sender?.photoURL || '',
+          },
+          zolbot: {
+            email: 'zolbot@zoldyck.ai',
+            username: 'Zolbot',
+            photoURL: '',
+            isBot: true,
+          },
         },
-        zolbot: {
-          email: 'zolbot@zoldyck.ai',
-          username: 'Zolbot',
-          photoURL: '',
-          isBot: true,
-        },
-      },
-      lastMessage: '',
-      updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
-    }, { merge: true });
+        lastMessage: '',
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+    }
   }
 
   await addDoc(collection(db, 'chats', chatId, 'messages'), {
@@ -467,21 +541,49 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
 == CHAT FEATURES ==
 - Send text messages in real-time.
 - Send images: tap the image icon in the message composer to pick from your gallery.
+- Tap any image in a chat to open it in a fullscreen lightbox viewer with a close button.
 - Emoji picker: tap the smiley icon to browse and insert emojis into your message.
-- Long-press any message to open options: Copy, Forward, or Delete (own messages only).
-- Forward messages to any other chat from the long-press menu.
 - Links in messages are tappable and open in your browser.
-- Messages show timestamps.
+- Messages show timestamps with read receipts: S (Sent) or R (Read) shown beside the time on your own messages.
 - Typing indicators: when the other person is typing, you see "typing..." under their name in the header.
 - Online status: a green dot appears next to users who are currently online.
 - Unread badges on the chat list show how many unread messages you have per chat.
 - Pull down on the chat list to refresh.
+
+== MESSAGE ACTIONS ==
+- Long-press any message to open the quick reaction and actions popover.
+- React to messages with ❤️ 👍 😂 😮 😢 🔥 🚀 — reaction pills appear below the message with counts. Tap a reaction to toggle it.
+- Copy text, Forward, or Delete (own messages only) from the actions menu.
+- Tap "Select Messages" in the popover to enter multi-select mode — then use the header actions to batch copy, forward, or delete.
+- In-chat search: tap the magnify (search) icon in the chat header to search within the conversation. Matching messages are highlighted, with Previous/Next navigation.
+
+== PROFILE DETAILS ==
+- Tap the header title or avatar in any chat to open the profile details sheet — shows full-size avatar, username, email, online status (1-on-1 chats), or group members list.
+
+== EMPTY CHAT WELCOME ==
+- When a chat has no messages yet, you'll see a welcome card with the person's name and quick starter chips like "Hey there! 👋" — tap any chip to send it instantly.
+
+== GROUP CHATS ==
+- Create group chats: tap the FAB (+ button) on the Chats screen, then tap the group icon.
+- Name your group and select members from your existing contacts.
+- Group chats show all members in the header (tap to see the full member list).
+- Admins can add new members and manage admin roles.
+- Leave a group anytime from the 3-dot menu.
+
+== FAB SPEED DIAL ==
+- On the Chats screen, tap the purple + FAB to open the speed dial with two options:
+  - Search (magnify icon): search for users by email or username to start a 1-on-1 chat.
+  - New Group (people icon): create a new group chat.
+
+== CHAT MENU ==
+- Tap the 3-dot menu in the chat header for options: Clear Chat (deletes all messages), and for groups: View Members, Add Members, and Leave Group.
 
 == ZOLBOT (YOU!) ==
 - Zolbot is a special AI chat, always pinned at the top of the chat list.
 - Zolbot uses the Groq API with the Llama 3.3 70B model.
 - You have a 5-second cooldown between messages to prevent spam.
 - You are always available — every user has a Zolbot chat automatically.
+- You can also be added to group chats as a member.
 - If you encounter an error, you report it honestly.
 
 == PROFILE & SETTINGS ==
@@ -489,10 +591,11 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
 - Change your display username (shown in chats and to other users).
 - Upload or change your profile photo (via camera/gallery picker, stored on Cloudinary).
 - Toggle Dark Mode on/off with the switch — the app supports both dark and light themes.
+- Adjust Font Size: choose S (Small), M (Medium), L (Large), or XL (Extra Large) to scale all text in the app.
 - Log Out button to sign out.
 
 == FINDING USERS ==
-- Tap the purple Floating Action Button (+) on the Chats screen.
+- Tap the purple Floating Action Button (+) on the Chats screen to open the speed dial.
 - Search for users by their email address or username.
 - Tap a search result to start a new chat with that person.
 
@@ -500,6 +603,7 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
 - Global Chat is a public room where every user can send messages.
 - It appears at the top of your chat list with a 🌍 globe icon and green name.
 - Anyone in the app can read and send messages here — no invite needed.
+- Messages automatically delete after 72 hours.
 - Great for meeting new people, making announcements, or casual group conversation.
 
 == SECURITY ==
@@ -579,10 +683,16 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
 
 export async function deleteMessage(chatId, messageId) {
   await deleteDoc(doc(db, 'chats', chatId, 'messages', messageId));
+  const cached = await getCachedMessages(chatId);
+  if (cached.length > 0) {
+    await cacheMessages(chatId, cached.filter((m) => m.id !== messageId));
+  }
 }
 
 export async function deleteChat(chatId) {
+  await clearChatMessages(chatId);
   await deleteDoc(doc(db, 'chats', chatId));
+  await clearCachedMessages(chatId);
 }
 
 export async function forwardMessage(targetChatId, sender, originalText, originalImageUrl) {
@@ -614,26 +724,29 @@ export async function sendImageMessage(chatId, sender, imageUrl) {
   const senderUsername = sender?.username || sender?.displayName || senderEmail || 'User';
 
   if (chatId.startsWith('zolbot__')) {
-    await setDoc(doc(db, 'chats', chatId), {
-      id: chatId,
-      participants: [senderId, 'zolbot'],
-      participantMeta: {
-        [senderId]: {
-          email: senderEmail,
-          username: senderUsername,
-          photoURL: sender?.photoURL || '',
+    const existingChat = await getDoc(doc(db, 'chats', chatId));
+    if (!existingChat.exists()) {
+      await setDoc(doc(db, 'chats', chatId), {
+        id: chatId,
+        participants: [senderId, 'zolbot'],
+        participantMeta: {
+          [senderId]: {
+            email: senderEmail,
+            username: senderUsername,
+            photoURL: sender?.photoURL || '',
+          },
+          zolbot: {
+            email: 'zolbot@zoldyck.ai',
+            username: 'Zolbot',
+            photoURL: '',
+            isBot: true,
+          },
         },
-        zolbot: {
-          email: 'zolbot@zoldyck.ai',
-          username: 'Zolbot',
-          photoURL: '',
-          isBot: true,
-        },
-      },
-      lastMessage: '',
-      updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
-    }, { merge: true });
+        lastMessage: '',
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+    }
   }
 
   await addDoc(collection(db, 'chats', chatId, 'messages'), {

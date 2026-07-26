@@ -122,7 +122,7 @@ export function AppAlertProvider() {
             <Text style={styles.title}>{config.title}</Text>
             {config.message ? <Text style={styles.message}>{config.message}</Text> : null}
             <View style={styles.buttonColumn}>
-              {config.buttons.map((btn, i) => (
+              {(config.buttons || []).map((btn, i) => (
                 <Button
                   key={i}
                   mode={btn.style === 'destructive' ? 'contained' : btn.style === 'cancel' ? 'outlined' : 'contained'}

@@ -25,29 +25,34 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
-      setUser(authUser);
-      if (authUser) {
-        const profileRef = doc(db, 'users', authUser.uid);
-        const profileSnap = await getDoc(profileRef);
-        if (!profileSnap.exists()) {
-          const username = makeDefaultUsername(authUser.email);
-          await setDoc(profileRef, {
-            uid: authUser.uid,
-            email: authUser.email,
-            username,
-            usernameLower: username.toLowerCase(),
-            photoURL: authUser.photoURL || '',
-            createdAt: serverTimestamp(),
-          }, { merge: true });
-          await updateProfile(authUser, { displayName: username });
-          setProfile({ uid: authUser.uid, email: authUser.email, username, photoURL: authUser.photoURL || '' });
+      try {
+        setUser(authUser);
+        if (authUser) {
+          const profileRef = doc(db, 'users', authUser.uid);
+          const profileSnap = await getDoc(profileRef);
+          if (!profileSnap.exists()) {
+            const username = makeDefaultUsername(authUser.email);
+            await setDoc(profileRef, {
+              uid: authUser.uid,
+              email: authUser.email,
+              username,
+              usernameLower: username.toLowerCase(),
+              photoURL: authUser.photoURL || '',
+              createdAt: serverTimestamp(),
+            }, { merge: true });
+            await updateProfile(authUser, { displayName: username });
+            setProfile({ uid: authUser.uid, email: authUser.email, username, photoURL: authUser.photoURL || '' });
+          } else {
+            setProfile(profileSnap.data());
+          }
         } else {
-          setProfile(profileSnap.data());
+          setProfile(null);
         }
-      } else {
-        setProfile(null);
+      } catch {
+        // Profile fetch may fail offline — fall back to Firebase user
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return unsubscribe;

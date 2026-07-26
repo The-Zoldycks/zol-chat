@@ -17,6 +17,14 @@ const mockFirestore = {
   setDoc: jest.fn(() => Promise.resolve()),
   updateDoc: jest.fn(() => Promise.resolve()),
   addDoc: jest.fn(() => Promise.resolve()),
+  deleteDoc: jest.fn(() => Promise.resolve()),
+  getDocs: jest.fn(() => Promise.resolve({ docs: [], forEach: jest.fn() })),
+  writeBatch: jest.fn(() => ({
+    delete: jest.fn(),
+    set: jest.fn(),
+    commit: jest.fn(() => Promise.resolve()),
+  })),
+  transaction: jest.fn(async (db, fn) => fn({ get: jest.fn(() => Promise.resolve({ exists: () => false, data: () => ({}) })), update: jest.fn() })),
   query: jest.fn(),
   where: jest.fn(),
   orderBy: jest.fn(),
@@ -35,6 +43,7 @@ const mockApp = { name: '[DEFAULT]' };
 
 module.exports = {
   initializeApp: jest.fn(() => mockApp),
+  getApps: jest.fn(() => []),
   getAuth: jest.fn(() => mockAuth),
   initializeFirestore: jest.fn(() => mockFirestore),
   getStorage: jest.fn(() => mockStorage),
@@ -54,6 +63,14 @@ module.exports = {
   setDoc: jest.fn(() => Promise.resolve()),
   updateDoc: jest.fn(() => Promise.resolve()),
   addDoc: jest.fn(() => Promise.resolve()),
+  deleteDoc: jest.fn(() => Promise.resolve()),
+  getDocs: jest.fn(() => Promise.resolve({ docs: [], forEach: jest.fn() })),
+  writeBatch: jest.fn(() => ({
+    delete: jest.fn(),
+    set: jest.fn(),
+    commit: jest.fn(() => Promise.resolve()),
+  })),
+  transaction: jest.fn(async (db, fn) => fn({ get: jest.fn(() => Promise.resolve({ exists: () => false, data: () => ({}) })), update: jest.fn() })),
   query: jest.fn(),
   where: jest.fn(),
   orderBy: jest.fn(),
