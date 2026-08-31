@@ -30,9 +30,6 @@
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
-    "updates": {
-      "url": "https://u.expo.dev/YOUR_PROJECT_ID"
-    },
     "runtimeVersion": "1.0.0"
   }
 }
