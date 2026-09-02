@@ -1,1 +1,0 @@
-Placeholder for icon.png. Add the real binary asset here before building the app.

@@ -59,10 +59,31 @@ export function AuthProvider({ children }) {
   }, []);
 
   const register = useCallback(async ({ email, password }) => {
-    const response = await createUserWithEmailAndPassword(auth, email, password);
-    const username = makeDefaultUsername(email);
-    await updateProfile(response.user, { displayName: username });
-    setIsNewUser(true);
+    try {
+      const response = await createUserWithEmailAndPassword(auth, email, password);
+      const username = makeDefaultUsername(email);
+      await updateProfile(response.user, { displayName: username });
+      setIsNewUser(true);
+    } catch (e) {
+      if (e?.code === 'auth/email-already-in-use') {
+        const response = await signInWithEmailAndPassword(auth, email, password);
+        const profileSnap = await getDoc(doc(db, 'users', response.user.uid));
+        if (!profileSnap.exists()) {
+          const username = makeDefaultUsername(email);
+          await setDoc(doc(db, 'users', response.user.uid), {
+            uid: response.user.uid,
+            email: response.user.email,
+            username,
+            usernameLower: username.toLowerCase(),
+            photoURL: response.user.photoURL || '',
+            createdAt: serverTimestamp(),
+          }, { merge: true });
+          await updateProfile(response.user, { displayName: username });
+        }
+      } else {
+        throw e;
+      }
+    }
   }, []);
 
   const login = useCallback(({ email, password }) => signInWithEmailAndPassword(auth, email, password), []);

@@ -106,6 +106,7 @@ export default function EmojiPicker({ onSelect, colors }) {
         keyExtractor={(item, i) => `${item}-${i}`}
         numColumns={8}
         contentContainerStyle={styles.grid}
+        keyboardShouldPersistTaps="always"
         renderItem={({ item }) => (
           <Pressable style={styles.emojiBtn} onPress={() => onSelect(item)}>
             <Text style={styles.emoji}>{item}</Text>

@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { Animated, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Avatar, Button, Checkbox, FAB, IconButton, List, Portal, Searchbar, Surface, Text, TextInput } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useOnline } from '../context/OnlineContext';
 import { useUnread } from '../context/UnreadContext';
-import { findUsersByEmailOrUsername, getUnreadCounts, startOrOpenChat, subscribeToChats, deleteChat, GLOBAL_CHAT_ID, ensureGlobalChatExists, createGroupChat } from '../services/chatService';
+import { getUnreadCounts, subscribeToChats, deleteChat, GLOBAL_CHAT_ID, ensureGlobalChatExists, createGroupChat } from '../services/chatService';
 import { showAlert } from '../components/AppAlert';
 
 const formatChatTime = (timestamp) => {
@@ -42,17 +42,10 @@ export default function ChatsScreen({ navigation }) {
   const { updateTotal } = useUnread();
   const styles = useMemo(() => createStyles(colors, scaleFont), [colors, scaleFont]);
   const [chats, setChats] = useState([]);
-  const [showComposer, setShowComposer] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupNameInput, setGroupNameInput] = useState('');
   const [selectedGroupUids, setSelectedGroupUids] = useState([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
-  const [speedDialOpen, setSpeedDialOpen] = useState(false);
-  const speedDialAnim = useRef(new Animated.Value(0)).current;
-
-  const [searchTerm, setSearchTerm] = useState('');
-  const [results, setResults] = useState([]);
-  const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [chatFilter, setChatFilter] = useState('');
   const [unreadCounts, setUnreadCounts] = useState({});
@@ -87,33 +80,6 @@ export default function ChatsScreen({ navigation }) {
     }).catch(() => {});
   }, [user?.uid, chats, updateTotal]);
 
-  const toggleSpeedDial = () => {
-    if (speedDialOpen) {
-      Animated.timing(speedDialAnim, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }).start(() => setSpeedDialOpen(false));
-    } else {
-      setSpeedDialOpen(true);
-      Animated.spring(speedDialAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        bounciness: 6,
-      }).start();
-    }
-  };
-
-  const closeSpeedDial = () => {
-    if (speedDialOpen) {
-      Animated.timing(speedDialAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }).start(() => setSpeedDialOpen(false));
-    }
-  };
-
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     getUnreadCounts(user.uid, chats).then((counts) => {
@@ -121,42 +87,6 @@ export default function ChatsScreen({ navigation }) {
       updateTotal(counts);
     }).catch(() => {}).finally(() => setRefreshing(false));
   }, [user?.uid, chats, updateTotal]);
-
-  const runSearch = async (value) => {
-    setSearchTerm(value);
-    if (!value.trim()) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    try {
-      const found = await findUsersByEmailOrUsername(value, user.uid);
-      setResults(found);
-    } catch {
-      setResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const openChatWithUser = async (target) => {
-    try {
-      const chatId = await startOrOpenChat(profile, target);
-      setShowComposer(false);
-      setSearchTerm('');
-      setResults([]);
-      navigation.navigate('ChatRoom', { chatId, target });
-    } catch (err) {
-      showAlert('Error', err?.message || 'Could not start chat. Please try again.', [{ text: 'OK' }]);
-    }
-  };
-
-  const closeComposer = () => {
-    setShowComposer(false);
-    setSearchTerm('');
-    setResults([]);
-  };
 
   const onDeleteChat = (chat) => {
     const chatTitle = chat.isGroup
@@ -368,7 +298,7 @@ export default function ChatsScreen({ navigation }) {
               title={item.partner.username || item.partner.email || 'Unknown User'}
               description={item.lastMessage || 'Say hello 👋'}
               onPress={() => navigation.navigate('ChatRoom', { chatId: item.id, target: item.partner })}
-              onLongPress={() => onDeleteChat(item)}
+              onLongPress={() => { if (!item.partner.isGlobal) onDeleteChat(item); }}
               titleStyle={[
                 styles.chatTitle,
                 item.partner.uid === 'zolbot' && styles.zolbotTitle,
@@ -390,7 +320,7 @@ export default function ChatsScreen({ navigation }) {
                 <View style={styles.avatarContainer}>
                   <View>
                     {item.partner.uid === 'zolbot' ? (
-                      <Avatar.Image source={require('../../assets/zolbot.jpg')} size={48} />
+                      <Avatar.Text size={48} label="🤖" style={[styles.avatarTextBg, { backgroundColor: colors.primary + '30' }]} labelStyle={{ fontSize: 24 }} />
                     ) : item.partner.isGlobal ? (
                       <Avatar.Text
                         size={48}
@@ -427,68 +357,6 @@ export default function ChatsScreen({ navigation }) {
       />
 
       <Portal>
-        {/* 1-on-1 User Search Sheet */}
-        {showComposer && (
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="box-none"
-          >
-            <Pressable style={styles.backdrop} onPress={closeComposer} />
-            <Surface style={styles.searchSheet} elevation={4}>
-              <Text variant="titleMedium" style={styles.composerTitle}>Start new chat</Text>
-              <Searchbar 
-                placeholder="Search by email or username" 
-                value={searchTerm} 
-                onChangeText={runSearch} 
-                style={styles.search} 
-                placeholderTextColor={colors.muted}
-                iconColor={colors.muted}
-                textColor={colors.onSurface}
-                loading={searching}
-              />
-              <FlatList
-                data={results}
-                keyExtractor={(item) => item.uid}
-                style={styles.searchResultsList}
-                ListEmptyComponent={searchTerm && !searching ? <Text style={styles.emptySmall}>No user found.</Text> : null}
-                renderItem={({ item }) => (
-                  <View style={styles.searchItemContainer}>
-                    <List.Item
-                      title={item.username || item.email}
-                      description={item.email}
-                      onPress={() => openChatWithUser(item)}
-                      titleStyle={styles.searchResultTitle}
-                      descriptionStyle={styles.searchResultDesc}
-                      left={() => (
-                        <View style={styles.searchAvatarContainer}>
-                          {item.photoURL ? (
-                            <Avatar.Image source={{ uri: item.photoURL }} size={40} />
-                          ) : (
-                            <Avatar.Text 
-                              size={40} 
-                              label={(item.username || item.email || '?').slice(0, 2).toUpperCase()} 
-                              style={styles.avatarTextBg}
-                              labelStyle={styles.avatarLabel}
-                            />
-                          )}
-                        </View>
-                      )}
-                    />
-                  </View>
-                )}
-              />
-              <FAB 
-                icon="close" 
-                style={styles.closeFab} 
-                onPress={closeComposer} 
-                size="small" 
-                color={colors.onSurface}
-              />
-            </Surface>
-          </KeyboardAvoidingView>
-        )}
-
         {/* Group Creation Sheet */}
         {showCreateGroup && (
           <KeyboardAvoidingView
@@ -526,7 +394,7 @@ export default function ChatsScreen({ navigation }) {
                     >
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
                         {item.uid === 'zolbot' ? (
-                          <Avatar.Image source={require('../../assets/zolbot.jpg')} size={36} />
+                          <Avatar.Text size={36} label="🤖" style={[styles.avatarTextBg, { backgroundColor: colors.primary + '30' }]} labelStyle={{ fontSize: 18 }} />
                         ) : item.photoURL ? (
                           <Avatar.Image source={{ uri: item.photoURL }} size={36} />
                         ) : (
@@ -573,94 +441,16 @@ export default function ChatsScreen({ navigation }) {
         )}
       </Portal>
 
-      {/* Speed Dial Backdrop & Action Buttons */}
-      {speedDialOpen && (
-        <Pressable style={styles.speedDialBackdrop} onPress={closeSpeedDial}>
-          {/* Action Button 2: Group Icon */}
-          <Animated.View
-            style={[
-              styles.speedDialActionItem,
-              {
-                bottom: Math.max(insets.bottom + 16, 20) + 140,
-                opacity: speedDialAnim,
-                transform: [
-                  {
-                    translateY: speedDialAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [40, 0],
-                    }),
-                  },
-                  {
-                    scale: speedDialAnim,
-                  },
-                ],
-              },
-            ]}
-          >
-            <View style={styles.speedDialLabelBadge}>
-              <Text style={styles.speedDialLabelText}>New Group</Text>
-            </View>
-            <FAB
-              icon="account-group"
-              size="medium"
-              style={[styles.actionFab, { backgroundColor: colors.secondary }]}
-              color="#000000"
-              onPress={() => {
-                closeSpeedDial();
-                setShowCreateGroup(true);
-              }}
-            />
-          </Animated.View>
-
-          {/* Action Button 1: Search Icon */}
-          <Animated.View
-            style={[
-              styles.speedDialActionItem,
-              {
-                bottom: Math.max(insets.bottom + 16, 20) + 75,
-                opacity: speedDialAnim,
-                transform: [
-                  {
-                    translateY: speedDialAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [20, 0],
-                    }),
-                  },
-                  {
-                    scale: speedDialAnim,
-                  },
-                ],
-              },
-            ]}
-          >
-            <View style={styles.speedDialLabelBadge}>
-              <Text style={styles.speedDialLabelText}>Search Chat</Text>
-            </View>
-            <FAB
-              icon="magnify"
-              size="medium"
-              style={[styles.actionFab, { backgroundColor: colors.primary }]}
-              color="#000000"
-              onPress={() => {
-                closeSpeedDial();
-                setShowComposer(true);
-              }}
-            />
-          </Animated.View>
-        </Pressable>
-      )}
-
-      {/* Main Bottom-Right FAB + Button */}
+      {/* New Group FAB */}
       <FAB 
-        icon="plus" 
+        icon="account-group" 
         style={[
           styles.fab,
           { bottom: Math.max(insets.bottom + 16, 20) },
-          speedDialOpen && { backgroundColor: colors.surfaceVariant },
         ]} 
-        color={speedDialOpen ? colors.onSurface : colors.background} 
-        onPress={toggleSpeedDial} 
-        accessibilityLabel="Open options"
+        color={colors.background} 
+        onPress={() => setShowCreateGroup(true)} 
+        accessibilityLabel="Create group chat"
       />
     </View>
   );
@@ -676,8 +466,8 @@ const createStyles = (c, sf) => StyleSheet.create({
   },
   chatItemContainer: {
     borderBottomWidth: 1,
-    borderBottomColor: c.surface,
-    paddingVertical: 4,
+    borderBottomColor: c.surfaceVariant,
+    paddingVertical: 2,
   },
   chatTitle: {
     color: c.onSurface,
@@ -721,6 +511,7 @@ const createStyles = (c, sf) => StyleSheet.create({
   },
   searchBarContainer: {
     paddingHorizontal: 16,
+    paddingTop: 8,
     paddingBottom: 4,
   },
   chatSearch: {
@@ -781,8 +572,8 @@ const createStyles = (c, sf) => StyleSheet.create({
     left: 0,
     right: 0,
     maxHeight: '75%',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
     gap: 16,
     backgroundColor: c.surface,
@@ -796,7 +587,7 @@ const createStyles = (c, sf) => StyleSheet.create({
     left: 16,
     right: 16,
     maxHeight: '65%',
-    borderRadius: 28,
+    borderRadius: 24,
     padding: 20,
     gap: 16,
     backgroundColor: c.surface,
@@ -808,39 +599,6 @@ const createStyles = (c, sf) => StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 4,
-  },
-  search: {
-    borderRadius: 14,
-    backgroundColor: c.background,
-  },
-  searchResultsList: {
-    marginTop: 4,
-  },
-  searchItemContainer: {
-    borderBottomWidth: 1,
-    borderBottomColor: c.surfaceVariant,
-    paddingVertical: 2,
-  },
-  searchResultTitle: {
-    color: c.onSurface,
-    fontWeight: '600',
-  },
-  searchResultDesc: {
-    color: c.muted,
-  },
-  searchAvatarContainer: {
-    justifyContent: 'center',
-    marginRight: 6,
-  },
-  emptySmall: {
-    textAlign: 'center',
-    marginTop: 16,
-    color: c.muted,
-  },
-  closeFab: {
-    alignSelf: 'center',
-    marginTop: 8,
-    backgroundColor: c.surfaceVariant,
   },
   skeletonContainer: {
     paddingTop: 8,
@@ -875,37 +633,6 @@ const createStyles = (c, sf) => StyleSheet.create({
     width: '70%',
     borderRadius: 4,
     backgroundColor: c.surfaceVariant,
-  },
-  speedDialBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 99,
-  },
-  speedDialActionItem: {
-    position: 'absolute',
-    right: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    zIndex: 100,
-  },
-  speedDialLabelBadge: {
-    backgroundColor: c.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: c.surfaceVariant,
-    elevation: 3,
-  },
-  speedDialLabelText: {
-    color: c.onSurface,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  actionFab: {
-    borderRadius: 24,
-    elevation: 4,
   },
   contactSelectItem: {
     flexDirection: 'row',

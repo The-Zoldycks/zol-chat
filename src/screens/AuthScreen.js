@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
-import { Button, Card, HelperText, Text, TextInput } from 'react-native-paper';
+import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { Avatar, Button, Card, HelperText, Text, TextInput } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -48,7 +48,7 @@ export default function AuthScreen() {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
       <View style={styles.content}>
         <View style={styles.header}>
-          <Image source={require('../../assets/zol-logo.png')} style={styles.logo} />
+          <Avatar.Icon size={80} icon="chat" style={{ backgroundColor: colors.primary + '20' }} color={colors.primary} />
           <Text variant="headlineLarge" style={styles.title}>zol chat</Text>
           <Text variant="bodyLarge" style={styles.subtitle}>Beautiful and private conversations.</Text>
         </View>
@@ -135,12 +135,6 @@ const createStyles = (c) => StyleSheet.create({
   header: {
     alignItems: 'center',
     gap: 8,
-  },
-  logo: {
-    width: 80,
-    height: 80,
-    resizeMode: 'contain',
-    marginBottom: 8,
   },
   title: {
     fontWeight: '800',

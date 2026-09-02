@@ -1,7 +1,8 @@
+import { Platform } from 'react-native';
 import { MD3DarkTheme, MD3LightTheme } from 'react-native-paper';
 
 export const darkColors = {
-  primary: '#9D7CFF',
+  primary: '#4A90E2',
   secondary: '#30D5C8',
   background: '#090D1A',
   surface: '#12182C',
@@ -15,7 +16,7 @@ export const darkColors = {
 };
 
 export const lightColors = {
-  primary: '#7C5CD9',
+  primary: '#3478F6',
   secondary: '#2AB5A8',
   background: '#F5F5FA',
   surface: '#FFFFFF',
@@ -30,8 +31,30 @@ export const lightColors = {
 
 export const colors = darkColors;
 
+const systemFontConfig = {
+  fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
+  fonts: {
+    displaySmall: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    displayMedium: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    displayLarge: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    headlineSmall: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    headlineMedium: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    headlineLarge: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    titleSmall: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '500' },
+    titleMedium: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '500' },
+    titleLarge: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '500' },
+    bodySmall: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    bodyMedium: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    bodyLarge: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '400' },
+    labelSmall: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '500' },
+    labelMedium: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '500' },
+    labelLarge: { fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto', weight: '500' },
+  },
+};
+
 export const darkTheme = {
   ...MD3DarkTheme,
+  ...systemFontConfig,
   colors: {
     ...MD3DarkTheme.colors,
     primary: darkColors.primary,
@@ -46,6 +69,7 @@ export const darkTheme = {
 
 export const lightTheme = {
   ...MD3LightTheme,
+  ...systemFontConfig,
   colors: {
     ...MD3LightTheme.colors,
     primary: lightColors.primary,

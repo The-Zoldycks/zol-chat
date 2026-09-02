@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, FlatList, Image, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, FlatList, Image, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { Avatar, IconButton, ActivityIndicator, Button, Checkbox, List, Modal, Portal, Searchbar, Surface, Text, TextInput } from 'react-native-paper';
@@ -20,30 +20,43 @@ const senderObjFromProfile = (profile, user) => ({
   email: profile?.email || user?.email,
   username: profile?.username || user?.displayName || (user?.email ? user.email.split('@')[0] : 'User'),
   photoURL: profile?.photoURL || user?.photoURL || '',
+  displayName: profile?.username || user?.displayName || '',
 });
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+const MENTION_REGEX = /(@\w+)/g;
 const QUICK_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥', '🚀'];
 const STARTER_CHIPS = ['Hey there! 👋', "How's it going?", 'What are you working on?'];
 
-const LinkableText = ({ text, style }) => {
+const LinkableText = ({ text, style, mentionStyle }) => {
   if (!text) return null;
   const parts = text.split(URL_REGEX);
   return (
     <Text style={style}>
-      {parts.map((part, i) =>
-        part.match(/^(https?:\/\/[^\s]+)$/) ? (
-          <Text
-            key={i}
-            style={[style, { textDecorationLine: 'underline' }]}
-            onPress={() => Linking.openURL(part)}
-          >
-            {part}
-          </Text>
-        ) : (
-          <Text key={i}>{part}</Text>
-        )
-      )}
+      {parts.map((part, i) => {
+        if (part.match(/^(https?:\/\/[^\s]+)$/)) {
+          return (
+            <Text
+              key={i}
+              style={[style, { textDecorationLine: 'underline' }]}
+              onPress={() => Linking.openURL(part)}
+            >
+              {part}
+            </Text>
+          );
+        }
+        const mentionParts = part.split(MENTION_REGEX);
+        return mentionParts.map((mp, j) => {
+          if (mp.match(/^@\w+$/)) {
+            return (
+              <Text key={`${i}-${j}`} style={[style, mentionStyle || { color: '#64B5F6', fontWeight: '700' }]}>
+                {mp}
+              </Text>
+            );
+          }
+          return <Text key={`${i}-${j}`}>{mp}</Text>;
+        });
+      })}
     </Text>
   );
 };
@@ -94,6 +107,10 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [addingMembers, setAddingMembers] = useState(false);
   const [groupDocData, setGroupDocData] = useState(null);
 
+  // Mention autocomplete state
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionSuggestions, setMentionSuggestions] = useState([]);
+
   // New UI/UX features state
   const [showInChatSearch, setShowInChatSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -101,6 +118,10 @@ export default function ChatRoomScreen({ route, navigation }) {
   const [lightboxUri, setLightboxUri] = useState(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [reactionMsgItem, setReactionMsgItem] = useState(null);
+
+  useEffect(() => {
+    if (lightboxUri) Keyboard.dismiss();
+  }, [lightboxUri]);
 
   const [infoBar, setInfoBar] = useState(null);
   const infoBarTimeout = useRef(null);
@@ -223,7 +244,7 @@ export default function ChatRoomScreen({ route, navigation }) {
         headerTitle: () => (
           <Pressable onPress={() => setShowProfileSheet(true)} style={styles.headerTitleContainer}>
             {target?.uid === 'zolbot' ? (
-              <Avatar.Image source={require('../../assets/zolbot.jpg')} size={34} />
+              <Avatar.Text size={34} label="🤖" style={{ backgroundColor: colors.primary + '30' }} labelStyle={{ fontSize: 18 }} />
             ) : isGlobal ? (
               <Avatar.Text
                 size={34}
@@ -332,6 +353,37 @@ export default function ChatRoomScreen({ route, navigation }) {
         setTyping(chatId, uid, false);
       }, 3000);
     }
+
+    // @mention detection for group chats
+    if (isGroup && groupDocData) {
+      const cursorText = value;
+      const atIndex = cursorText.lastIndexOf('@');
+      if (atIndex >= 0 && (atIndex === 0 || cursorText[atIndex - 1] === ' ')) {
+        const query = cursorText.slice(atIndex + 1).toLowerCase();
+        const participants = groupDocData.participants || [];
+        const meta = groupDocData.participantMeta || {};
+        const suggestions = participants
+          .filter((pid) => pid !== currentUid)
+          .map((pid) => ({
+            uid: pid,
+            username: meta[pid]?.username || meta[pid]?.email || pid,
+          }))
+          .filter((p) => p.username.toLowerCase().includes(query));
+        setMentionQuery(atIndex);
+        setMentionSuggestions(suggestions);
+      } else {
+        setMentionQuery(null);
+        setMentionSuggestions([]);
+      }
+    }
+  };
+
+  const insertMention = (username) => {
+    const before = text.slice(0, mentionQuery);
+    const after = text.slice(mentionQuery + 1 + (text.slice(mentionQuery + 1).split(' ')[0] || '').length);
+    setText(before + '@' + username + ' ' + after);
+    setMentionQuery(null);
+    setMentionSuggestions([]);
   };
 
   const onSend = async () => {
@@ -641,6 +693,27 @@ export default function ChatRoomScreen({ route, navigation }) {
 
             return (
               <View style={{ marginVertical: 4 }}>
+                {isGroup || isGlobal ? (
+                  <View style={[styles.senderRow, mine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' }]}>
+                    {!mine && (
+                      item.senderPhotoURL ? (
+                        <Avatar.Image source={{ uri: item.senderPhotoURL }} size={20} style={{ marginRight: 6 }} />
+                      ) : (
+                        <Avatar.Text
+                          size={20}
+                          label={(item.senderUsername || '?').slice(0, 1).toUpperCase()}
+                          style={[styles.senderAvatar, { backgroundColor: colors.surfaceVariant }]}
+                          labelStyle={{ fontSize: 10, color: colors.primary }}
+                        />
+                      )
+                    )}
+                    {!mine && (
+                      <Text style={[styles.senderName, { color: colors.muted }]}>
+                        {item.senderUsername || 'Unknown'}
+                      </Text>
+                    )}
+                  </View>
+                ) : null}
                 <Pressable
                   onLongPress={() => onLongPressMessage(item)}
                   onPress={() => { if (selectedMessages.length > 0) toggleSelect(item); }}
@@ -662,6 +735,7 @@ export default function ChatRoomScreen({ route, navigation }) {
                         resizeMode="cover"
                         onLoadStart={() => setLoadingImages((prev) => ({ ...prev, [item.id]: true }))}
                         onLoadEnd={() => setLoadingImages((prev) => ({ ...prev, [item.id]: false }))}
+                        onError={() => setLoadingImages((prev) => ({ ...prev, [item.id]: false }))}
                       />
                     </Pressable>
                   ) : null}
@@ -701,6 +775,20 @@ export default function ChatRoomScreen({ route, navigation }) {
           onSelect={(emoji) => setText((prev) => prev + emoji)}
           colors={colors}
         />
+      )}
+
+      {mentionSuggestions.length > 0 && (
+        <View style={[styles.mentionContainer, { borderBottomColor: colors.surfaceVariant }]}>
+          {mentionSuggestions.map((s) => (
+            <Pressable
+              key={s.uid}
+              style={[styles.mentionItem, { borderBottomColor: colors.surfaceVariant }]}
+              onPress={() => insertMention(s.username)}
+            >
+              <Text style={{ color: colors.onSurface, fontWeight: '600', fontSize: 14 }}>@{s.username}</Text>
+            </Pressable>
+          ))}
+        </View>
       )}
 
       <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
@@ -794,14 +882,14 @@ export default function ChatRoomScreen({ route, navigation }) {
                     titleStyle={{ color: colors.danger, fontWeight: '600' }}
                   />
                 </>
-              ) : (
+              ) : !isGlobal ? (
                 <List.Item
                   title="Clear Chat"
                   left={(props) => <List.Icon {...props} icon="broom" color={colors.danger} />}
                   onPress={handleClearChat}
                   titleStyle={{ color: colors.danger, fontWeight: '600' }}
                 />
-              )}
+              ) : null}
 
               <Button
                 mode="outlined"
@@ -842,7 +930,7 @@ export default function ChatRoomScreen({ route, navigation }) {
                       left={() => (
                         <View style={{ justifyContent: 'center', marginRight: 8 }}>
                           {memberUid === 'zolbot' ? (
-                            <Avatar.Image source={require('../../assets/zolbot.jpg')} size={36} />
+                            <Avatar.Text size={36} label="🤖" style={{ backgroundColor: colors.primary + '30' }} labelStyle={{ fontSize: 18 }} />
                           ) : meta.photoURL ? (
                             <Avatar.Image source={{ uri: meta.photoURL }} size={36} />
                           ) : (
@@ -911,7 +999,7 @@ export default function ChatRoomScreen({ route, navigation }) {
                     >
                       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                         {item.uid === 'zolbot' ? (
-                          <Avatar.Image source={require('../../assets/zolbot.jpg')} size={36} />
+                          <Avatar.Text size={36} label="🤖" style={{ backgroundColor: colors.primary + '30' }} labelStyle={{ fontSize: 18 }} />
                         ) : item.photoURL ? (
                           <Avatar.Image source={{ uri: item.photoURL }} size={36} />
                         ) : (
@@ -989,7 +1077,9 @@ export default function ChatRoomScreen({ route, navigation }) {
         {Boolean(lightboxUri) && (
           <Modal visible={Boolean(lightboxUri)} onDismiss={() => setLightboxUri(null)} contentContainerStyle={styles.lightboxContainer}>
             <Pressable style={styles.lightboxBackdrop} onPress={() => setLightboxUri(null)}>
-              <Image source={{ uri: lightboxUri }} style={styles.lightboxImage} resizeMode="contain" />
+              <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', height: '80%' }}>
+                <Image source={{ uri: lightboxUri }} style={styles.lightboxImage} resizeMode="contain" />
+              </Pressable>
               <View style={[styles.lightboxHeaderActions, { top: insets.top + 10 }]}>
                 <IconButton icon="close" iconColor="#FFFFFF" size={28} onPress={() => setLightboxUri(null)} />
               </View>
@@ -1005,7 +1095,7 @@ export default function ChatRoomScreen({ route, navigation }) {
               <View style={styles.sheetHandle} />
               <View style={{ alignItems: 'center', marginVertical: 12, gap: 8 }}>
                 {target?.uid === 'zolbot' ? (
-                  <Avatar.Image source={require('../../assets/zolbot.jpg')} size={90} />
+                  <Avatar.Text size={90} label="🤖" style={{ backgroundColor: colors.primary + '30' }} labelStyle={{ fontSize: 44 }} />
                 ) : isGlobal ? (
                   <Avatar.Text size={90} label="🌍" style={{ backgroundColor: colors.primary + '30' }} labelStyle={{ fontSize: 44 }} />
                 ) : isGroup ? (
@@ -1182,10 +1272,10 @@ const createStyles = (c, sf) => StyleSheet.create({
     paddingBottom: 8,
   },
   bubble: {
-    maxWidth: '75%',
-    marginVertical: 4,
+    maxWidth: '78%',
+    marginVertical: 3,
     paddingTop: 10,
-    paddingBottom: 4,
+    paddingBottom: 6,
     paddingHorizontal: 14,
     elevation: 1,
     alignSelf: 'flex-start',
@@ -1220,19 +1310,34 @@ const createStyles = (c, sf) => StyleSheet.create({
     borderWidth: 2,
     borderColor: c.primary,
   },
+  senderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+    paddingHorizontal: 4,
+  },
+  senderAvatar: {
+    marginRight: 6,
+  },
+  senderName: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   messageImage: {
-    width: 200,
-    height: 200,
+    width: '100%',
+    aspectRatio: 1,
     borderRadius: 12,
   },
   imageContainer: {
     width: 200,
-    height: 200,
+    maxWidth: '100%',
+    aspectRatio: 1,
     borderRadius: 12,
     marginBottom: 4,
     backgroundColor: c.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   imageLoader: {
     position: 'absolute',
@@ -1414,12 +1519,12 @@ const createStyles = (c, sf) => StyleSheet.create({
   },
   lightboxImage: {
     width: '100%',
-    height: '80%',
+    height: '100%',
   },
   lightboxHeaderActions: {
     position: 'absolute',
-    top: 40,
-    right: 20,
+    top: 16,
+    right: 16,
   },
   profileSheet: {
     position: 'absolute',
@@ -1427,8 +1532,8 @@ const createStyles = (c, sf) => StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: c.surface,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
     borderTopWidth: 1,
     borderColor: c.surfaceVariant,
@@ -1444,5 +1549,15 @@ const createStyles = (c, sf) => StyleSheet.create({
     padding: 16,
     borderTopWidth: 1,
     borderColor: c.surfaceVariant,
+  },
+  mentionContainer: {
+    backgroundColor: c.surface,
+    borderTopWidth: 1,
+    maxHeight: 160,
+  },
+  mentionItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
   },
 });

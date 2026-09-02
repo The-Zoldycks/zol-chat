@@ -109,6 +109,35 @@ export async function purgeOldMessages(uid) {
 
 export const chatIdFromUsers = (uidA, uidB) => [uidA, uidB].sort().join('__');
 
+async function ensureZolbotChat(chatId, senderId, senderEmail, senderUsername, senderPhotoURL) {
+  try {
+    const existingChat = await getDoc(doc(db, 'chats', chatId));
+    if (existingChat.exists()) return;
+  } catch {
+    // getDoc may fail for non-existent docs if rules reference resource.data
+  }
+  await setDoc(doc(db, 'chats', chatId), {
+    id: chatId,
+    participants: [senderId, 'zolbot'],
+    participantMeta: {
+      [senderId]: {
+        email: senderEmail,
+        username: senderUsername,
+        photoURL: senderPhotoURL || '',
+      },
+      zolbot: {
+        email: 'zolbot@zoldyck.ai',
+        username: 'Zolbot',
+        photoURL: '',
+        isBot: true,
+      },
+    },
+    lastMessage: '',
+    updatedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+  });
+}
+
 export async function findUsersByEmailOrUsername(term, currentUid) {
   const normalized = term.trim().toLowerCase();
   if (!normalized) return [];
@@ -149,8 +178,13 @@ export async function findUsersByEmailOrUsername(term, currentUid) {
 export async function startOrOpenChat(currentUser, targetUser) {
   const chatId = chatIdFromUsers(currentUser.uid, targetUser.uid);
   const chatRef = doc(db, 'chats', chatId);
-  const existing = await getDoc(chatRef);
-  if (existing.exists()) return chatId;
+
+  try {
+    const existing = await getDoc(chatRef);
+    if (existing.exists()) return chatId;
+  } catch {
+    // getDoc may fail for non-existent docs if rules reference resource.data
+  }
 
   await setDoc(chatRef, {
     id: chatId,
@@ -233,6 +267,7 @@ export async function createGroupChat({ groupName, participants, creator }) {
 }
 
 export async function clearChatMessages(chatId) {
+  if (chatId === GLOBAL_CHAT_ID) return;
   const msgsRef = collection(db, 'chats', chatId, 'messages');
   const snap = await getDocs(msgsRef);
   const batch = writeBatch(db);
@@ -457,31 +492,10 @@ export async function sendMessage(chatId, sender, text) {
   const senderId = sender?.uid || 'user';
   const senderEmail = sender?.email || '';
   const senderUsername = sender?.username || sender?.displayName || senderEmail || 'User';
+  const senderPhotoURL = sender?.photoURL || '';
 
   if (chatId.startsWith('zolbot__')) {
-    const existingChat = await getDoc(doc(db, 'chats', chatId));
-    if (!existingChat.exists()) {
-      await setDoc(doc(db, 'chats', chatId), {
-        id: chatId,
-        participants: [senderId, 'zolbot'],
-        participantMeta: {
-          [senderId]: {
-            email: senderEmail,
-            username: senderUsername,
-            photoURL: sender?.photoURL || '',
-          },
-          zolbot: {
-            email: 'zolbot@zoldyck.ai',
-            username: 'Zolbot',
-            photoURL: '',
-            isBot: true,
-          },
-        },
-        lastMessage: '',
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
-    }
+    await ensureZolbotChat(chatId, senderId, senderEmail, senderUsername, sender?.photoURL);
   }
 
   await addDoc(collection(db, 'chats', chatId, 'messages'), {
@@ -489,6 +503,7 @@ export async function sendMessage(chatId, sender, text) {
     senderId: senderId,
     senderEmail: senderEmail,
     senderUsername: senderUsername,
+    senderPhotoURL: senderPhotoURL,
     status: 'sent',
     createdAt: serverTimestamp(),
   });
@@ -501,9 +516,12 @@ export async function sendMessage(chatId, sender, text) {
   if (chatId.startsWith('zolbot__')) {
     respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername });
   } else if (chatId.startsWith('group_')) {
-    const chatSnap = await getDoc(doc(db, 'chats', chatId));
-    if (chatSnap.exists() && chatSnap.data()?.participants?.includes('zolbot')) {
-      respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername });
+    const mentionRegex = /@zolbot\b/i;
+    if (mentionRegex.test(trimmed)) {
+      const chatSnap = await getDoc(doc(db, 'chats', chatId));
+      if (chatSnap.exists() && chatSnap.data()?.participants?.includes('zolbot')) {
+        respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername });
+      }
     }
   }
 }
@@ -580,7 +598,6 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
 
 == ZOLBOT (YOU!) ==
 - Zolbot is a special AI chat, always pinned at the top of the chat list.
-- Zolbot uses the Groq API with the Llama 3.3 70B model.
 - You have a 5-second cooldown between messages to prevent spam.
 - You are always available — every user has a Zolbot chat automatically.
 - You can also be added to group chats as a member.
@@ -625,6 +642,7 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
     ];
 
     const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY;
+    const model = process.env.EXPO_PUBLIC_GROQ_MODEL || 'openai/gpt-oss-20b';
     if (!apiKey) {
       await addDoc(collection(db, 'chats', chatId, 'messages'), {
         text: "Hi! I'm ready to chat, but my API key is not configured yet!",
@@ -643,7 +661,7 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: model,
         messages: groqMessages,
       }),
     });
@@ -722,31 +740,10 @@ export async function sendImageMessage(chatId, sender, imageUrl) {
   const senderId = sender?.uid || 'user';
   const senderEmail = sender?.email || '';
   const senderUsername = sender?.username || sender?.displayName || senderEmail || 'User';
+  const senderPhotoURL = sender?.photoURL || '';
 
   if (chatId.startsWith('zolbot__')) {
-    const existingChat = await getDoc(doc(db, 'chats', chatId));
-    if (!existingChat.exists()) {
-      await setDoc(doc(db, 'chats', chatId), {
-        id: chatId,
-        participants: [senderId, 'zolbot'],
-        participantMeta: {
-          [senderId]: {
-            email: senderEmail,
-            username: senderUsername,
-            photoURL: sender?.photoURL || '',
-          },
-          zolbot: {
-            email: 'zolbot@zoldyck.ai',
-            username: 'Zolbot',
-            photoURL: '',
-            isBot: true,
-          },
-        },
-        lastMessage: '',
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
-    }
+    await ensureZolbotChat(chatId, senderId, senderEmail, senderUsername, sender?.photoURL);
   }
 
   await addDoc(collection(db, 'chats', chatId, 'messages'), {
@@ -755,6 +752,7 @@ export async function sendImageMessage(chatId, sender, imageUrl) {
     senderId,
     senderEmail,
     senderUsername,
+    senderPhotoURL,
     status: 'sent',
     createdAt: serverTimestamp(),
   });

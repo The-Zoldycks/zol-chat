@@ -9,8 +9,6 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "jest",
-    "test:watch": "jest --watch",
     "update": "eas update --branch production"
   },
   "dependencies": {
@@ -34,20 +32,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
-    "@testing-library/react-native": "^13.3.3",
     "eslint": "^9.0.0",
-    "eslint-config-expo": "~10.0.0",
-    "jest": "^29.7.0",
-    "jest-expo": "~54.0.0"
-  },
-  "jest": {
-    "preset": "jest-expo",
-    "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)|(react-native)|(@react-native)|(@react-navigation)|(expo)|(@expo)|(firebase)|(@firebase/)))"
-    ],
-    "moduleNameMapper": {
-      "^firebase/(.*)$": "<rootDir>/__mocks__/firebase.js",
-      "^@firebase/(.*)$": "<rootDir>/__mocks__/firebase.js"
-    }
+    "eslint-config-expo": "~10.0.0"
   }
 }
