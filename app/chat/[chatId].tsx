@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,16 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { doc, getDoc } from 'firebase/firestore';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { db } from '../../src/services/firebase';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useThemeColors } from '../../src/hooks/useTheme';
 import { Avatar } from '../../components/Avatar';
 import { MessageBubble } from '../../components/MessageBubble';
 import { MessageInput } from '../../components/MessageInput';
-import { MentionText } from '../../components/MentionText';
 import {
   subscribeToMessages,
   subscribeToPresence,
@@ -52,12 +54,20 @@ export default function ChatScreen() {
   const [presence, setPresence] = useState<Record<string, any>>({});
   const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
   const [typingTimeout, setTypingTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [chatData, setChatData] = useState<any>(null);
 
   const flatListRef = useRef<FlatList>(null);
 
   const isGlobal = chatId === GLOBAL_CHAT_ID;
   const isZolbot = chatId?.startsWith('zolbot__');
   const isGroup = chatId?.startsWith('group_');
+
+  useEffect(() => {
+    if (!chatId) return;
+    getDoc(doc(db, 'chats', chatId)).then((snap) => {
+      if (snap.exists()) setChatData(snap.data());
+    }).catch(() => {});
+  }, [chatId]);
 
   useEffect(() => {
     if (!chatId || !user) return;
@@ -85,18 +95,32 @@ export default function ChatScreen() {
     };
   }, []);
 
+  const getOtherUser = () => {
+    if (!chatData?.participantMeta || !user) return null;
+    const entries = Object.entries(chatData.participantMeta);
+    const other = entries.find(([key]) => key !== user.uid);
+    return other ? (other[1] as any) : null;
+  };
+
   const getChatTitle = () => {
     if (isGlobal) return 'Global Chat';
     if (isZolbot) return 'Zolbot';
-    const lastMsg = messages[messages.length - 1];
-    if (isGroup) return `Group Chat`;
-    return 'Chat';
+    if (isGroup) return chatData?.groupName || 'Group Chat';
+    const other = getOtherUser();
+    return other?.username || 'Chat';
+  };
+
+  const getChatAvatar = () => {
+    if (isZolbot) return null;
+    if (isGlobal) return null;
+    const other = getOtherUser();
+    return other?.photoURL || null;
   };
 
   const getTypingText = () => {
     const typingUsers = Object.values(presence).filter((p: any) => p.typing);
     if (typingUsers.length === 0) return null;
-    if (typingUsers.length === 1) return `${typingUsers[0].uid} is typing...`;
+    if (typingUsers.length === 1) return `typing...`;
     return 'Multiple people typing...';
   };
 
@@ -202,159 +226,159 @@ export default function ChatScreen() {
     const isBotMsg = item.senderId === 'zolbot';
 
     return (
-      <View>
-        <MessageBubble
-          text={item.text || ''}
-          senderName={item.senderUsername || 'User'}
-          senderPhotoURL={item.senderPhotoURL}
-          timestamp={formatTime(item.createdAt)}
-          isOwn={isOwn}
-          isBot={isBotMsg}
-          isPending={item.status === 'pending'}
-          imageUrl={item.imageUrl}
-          onImagePress={(uri) => setImageViewerUri(uri)}
-        />
-      </View>
+      <MessageBubble
+        text={item.text || ''}
+        senderName={item.senderUsername || 'User'}
+        senderPhotoURL={item.senderPhotoURL}
+        timestamp={formatTime(item.createdAt)}
+        isOwn={isOwn}
+        isBot={isBotMsg}
+        isPending={item.status === 'pending'}
+        imageUrl={item.imageUrl}
+        onImagePress={(uri) => setImageViewerUri(uri)}
+      />
     );
   };
 
   const typingText = getTypingText();
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
-    >
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <MaterialIcons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.surface }]} edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <MaterialIcons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
 
-        <View style={styles.headerInfo}>
-          <Avatar
-            uri={null}
-            size={36}
-            isBot={isZolbot}
-          />
-          <View style={styles.headerText}>
-            <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
-              {isGlobal ? '🌍 ' : ''}{getChatTitle()}
-            </Text>
-            {typingText && (
-              <Text style={[styles.typingText, { color: colors.primary }]} numberOfLines={1}>
-                {typingText}
+          <View style={styles.headerInfo}>
+            <Avatar uri={getChatAvatar()} size={36} isBot={isZolbot} />
+            <View style={styles.headerText}>
+              <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+                {isGlobal ? '🌍 ' : ''}{getChatTitle()}
               </Text>
-            )}
+              {typingText && (
+                <Text style={[styles.typingText, { color: colors.primary }]} numberOfLines={1}>
+                  {typingText}
+                </Text>
+              )}
+            </View>
           </View>
-        </View>
 
-        <TouchableOpacity onPress={() => setSearchVisible(true)} style={styles.headerBtn}>
-          <MaterialIcons name="search" size={22} color={colors.textSecondary} />
-        </TouchableOpacity>
+          <TouchableOpacity onPress={() => setSearchVisible(true)} style={styles.headerBtn}>
+            <MaterialIcons name="search" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.headerBtn}>
-          <MaterialIcons name="more-vert" size={22} color={colors.textSecondary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* In-chat search bar */}
-      {searchVisible && (
-        <View style={[styles.searchBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <MaterialIcons name="search" size={18} color={colors.textTertiary} />
-          <View style={[styles.searchInput, { backgroundColor: colors.inputBackground }]}>
-            <MaterialIcons name="search" size={16} color={colors.textTertiary} />
-            <Text
-              style={[styles.searchInputText, { color: searchQuery ? colors.text : colors.textTertiary }]}
-            >
-              {searchQuery || 'Search messages...'}
-            </Text>
-          </View>
-          <TouchableOpacity onPress={() => { setSearchVisible(false); setSearchQuery(''); }}>
-            <MaterialIcons name="close" size={20} color={colors.textSecondary} />
+          <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.headerBtn}>
+            <MaterialIcons name="more-vert" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
-      )}
 
-      {/* Messages */}
-      <FlatList
-        ref={flatListRef}
-        data={filteredMessages}
-        keyExtractor={(item) => item.id || Math.random().toString()}
-        renderItem={renderMessage}
-        contentContainerStyle={styles.messagesList}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-        onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-        ListEmptyComponent={
-          <View style={styles.emptyChat}>
-            <Text style={[styles.emptyChatText, { color: colors.textTertiary }]}>
-              {isZolbot ? 'Start chatting with Zolbot!' : 'No messages yet. Say hello!'}
-            </Text>
-          </View>
-        }
-      />
-
-      {/* Message Input */}
-      <MessageInput
-        value={text}
-        onChangeText={handleTyping}
-        onSend={handleSend}
-        onImagePick={handleImageSend}
-        sending={sending}
-      />
-
-      {/* Options Menu Modal */}
-      <Modal visible={menuVisible} transparent animationType="fade">
-        <TouchableOpacity
-          style={[styles.menuOverlay, { backgroundColor: colors.overlay }]}
-          activeOpacity={1}
-          onPress={() => setMenuVisible(false)}
-        >
-          <View style={[styles.menuDropdown, { backgroundColor: colors.surface }]}>
-            <TouchableOpacity
-              style={[styles.menuItem, { borderBottomColor: colors.border }]}
-              onPress={handleClearChat}
-            >
-              <MaterialIcons name="delete-sweep" size={20} color={colors.danger} />
-              <Text style={[styles.menuItemText, { color: colors.danger }]}>Clear Chat</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={handleDeleteChat}>
-              <MaterialIcons name="delete-forever" size={20} color={colors.danger} />
-              <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete Chat</Text>
+        {/* In-chat search bar */}
+        {searchVisible && (
+          <View style={[styles.searchBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+            <View style={[styles.searchInput, { backgroundColor: colors.inputBackground }]}>
+              <MaterialIcons name="search" size={16} color={colors.textTertiary} />
+              <Text
+                style={[styles.searchInputText, { color: searchQuery ? colors.text : colors.textTertiary }]}
+              >
+                {searchQuery || 'Search messages...'}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => { setSearchVisible(false); setSearchQuery(''); }}>
+              <MaterialIcons name="close" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
-      </Modal>
+        )}
 
-      {/* Image Viewer Modal */}
-      <Modal visible={!!imageViewerUri} transparent animationType="fade">
-        <TouchableOpacity
-          style={[styles.imageViewerOverlay, { backgroundColor: 'rgba(0,0,0,0.9)' }]}
-          activeOpacity={1}
-          onPress={() => setImageViewerUri(null)}
-        >
+        {/* Messages */}
+        <View style={styles.messagesContainer}>
+          <FlatList
+            ref={flatListRef}
+            data={filteredMessages}
+            keyExtractor={(item) => item.id || Math.random().toString()}
+            renderItem={renderMessage}
+            contentContainerStyle={styles.messagesList}
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            ListEmptyComponent={
+              <View style={styles.emptyChat}>
+                <Text style={[styles.emptyChatText, { color: colors.textTertiary }]}>
+                  {isZolbot ? 'Start chatting with Zolbot!' : 'No messages yet. Say hello!'}
+                </Text>
+              </View>
+            }
+          />
+        </View>
+
+        {/* Message Input */}
+        <MessageInput
+          value={text}
+          onChangeText={handleTyping}
+          onSend={handleSend}
+          onImagePick={handleImageSend}
+          sending={sending}
+        />
+
+        {/* Options Menu Modal */}
+        <Modal visible={menuVisible} transparent animationType="fade">
           <TouchableOpacity
-            style={styles.imageViewerClose}
+            style={[styles.menuOverlay, { backgroundColor: colors.overlay }]}
+            activeOpacity={1}
+            onPress={() => setMenuVisible(false)}
+          >
+            <View style={[styles.menuDropdown, { backgroundColor: colors.surface }]}>
+              <TouchableOpacity
+                style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                onPress={handleClearChat}
+              >
+                <MaterialIcons name="delete-sweep" size={20} color={colors.danger} />
+                <Text style={[styles.menuItemText, { color: colors.danger }]}>Clear Chat</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem} onPress={handleDeleteChat}>
+                <MaterialIcons name="delete-forever" size={20} color={colors.danger} />
+                <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete Chat</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Image Viewer Modal */}
+        <Modal visible={!!imageViewerUri} transparent animationType="fade">
+          <TouchableOpacity
+            style={[styles.imageViewerOverlay, { backgroundColor: 'rgba(0,0,0,0.9)' }]}
+            activeOpacity={1}
             onPress={() => setImageViewerUri(null)}
           >
-            <MaterialIcons name="close" size={28} color="#FFF" />
+            <TouchableOpacity
+              style={styles.imageViewerClose}
+              onPress={() => setImageViewerUri(null)}
+            >
+              <MaterialIcons name="close" size={28} color="#FFF" />
+            </TouchableOpacity>
+            {imageViewerUri && (
+              <Image
+                source={{ uri: imageViewerUri }}
+                style={styles.imageViewer}
+                resizeMode="contain"
+              />
+            )}
           </TouchableOpacity>
-          {imageViewerUri && (
-            <Image
-              source={{ uri: imageViewerUri }}
-              style={styles.imageViewer}
-              resizeMode="contain"
-            />
-          )}
-        </TouchableOpacity>
-      </Modal>
-    </KeyboardAvoidingView>
+        </Modal>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  flex: {
     flex: 1,
   },
   header: {
@@ -407,6 +431,9 @@ const styles = StyleSheet.create({
   },
   searchInputText: {
     fontSize: 14,
+  },
+  messagesContainer: {
+    flex: 1,
   },
   messagesList: {
     paddingVertical: 8,

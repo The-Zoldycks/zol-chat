@@ -29,18 +29,14 @@ export function MessageBubble({
 
   return (
     <View style={[styles.container, { opacity: isPending ? 0.5 : 1 }]}>
-      {!isOwn && (
-        <View style={styles.avatarCol}>
-          <Avatar uri={senderPhotoURL} size={32} isBot={isBot} />
-        </View>
-      )}
+      <View style={styles.avatarCol}>
+        <Avatar uri={senderPhotoURL} size={32} isBot={isBot} />
+      </View>
 
       <View style={styles.contentCol}>
-        {!isOwn && (
-          <Text style={[styles.senderName, { color: isBot ? colors.primary : colors.primaryLight }]}>
-            {senderName}
-          </Text>
-        )}
+        <Text style={[styles.senderName, { color: isBot ? colors.primary : colors.primaryLight }]}>
+          {senderName}
+        </Text>
 
         {imageUrl && (
           <TouchableOpacity onPress={() => onImagePress?.(imageUrl)} activeOpacity={0.8}>
