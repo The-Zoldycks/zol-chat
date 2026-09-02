@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "myApp",
-    "slug": "myApp",
+    "name": "Zolchat",
+    "slug": "zolchat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "zolchat",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
