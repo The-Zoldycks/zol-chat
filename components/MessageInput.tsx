@@ -28,15 +28,17 @@ export function MessageInput({
         <MaterialIcons name="image" size={24} color={colors.primary} />
       </TouchableOpacity>
 
-      <TextInput
-        style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.textTertiary}
-        multiline
-        maxLength={2000}
-      />
+      <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground }]}>
+        <TextInput
+          style={[styles.input, { color: colors.text }]}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textTertiary}
+          multiline
+          maxLength={2000}
+        />
+      </View>
 
       {sending ? (
         <ActivityIndicator size="small" color={colors.primary} style={styles.sendBtn} />
@@ -61,23 +63,27 @@ export function MessageInput({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   imageBtn: {
     padding: 8,
-    marginBottom: 4,
+  },
+  inputWrapper: {
+    flex: 1,
+    borderRadius: 20,
+    marginHorizontal: 8,
+    justifyContent: 'center',
   },
   input: {
-    flex: 1,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 16,
     maxHeight: 100,
-    marginHorizontal: 8,
+    minHeight: 40,
   },
   sendBtn: {
     width: 40,
@@ -85,6 +91,5 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
   },
 });

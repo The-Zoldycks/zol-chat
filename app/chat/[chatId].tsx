@@ -11,10 +11,12 @@ import {
   Modal,
   Image,
   Dimensions,
+  TextInput,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { db } from '../../src/services/firebase';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -28,10 +30,15 @@ import {
   sendMessage,
   sendImageMessage,
   markChatAsRead,
+  markMessagesDelivered,
   setTyping,
   clearPresence,
   clearChatMessages,
   deleteChat,
+  addGroupMembers,
+  toggleGroupAdmin,
+  leaveGroup,
+  subscribeToUsersPresence,
   GLOBAL_CHAT_ID,
 } from '../../src/services/chatService';
 import { uploadToCloudinary } from '../../src/services/cloudinaryService';
@@ -46,6 +53,7 @@ export default function ChatScreen() {
   const router = useRouter();
 
   const [messages, setMessages] = useState<any[]>([]);
+  const [pendingMessages, setPendingMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -55,8 +63,17 @@ export default function ChatScreen() {
   const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
   const [typingTimeout, setTypingTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [chatData, setChatData] = useState<any>(null);
+  const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]);
+  const [showMentions, setShowMentions] = useState(false);
+  const [addMemberVisible, setAddMemberVisible] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [memberSearchResults, setMemberSearchResults] = useState<any[]>([]);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
+  const [otherUserOnline, setOtherUserOnline] = useState(false);
+  const [profileSheetUser, setProfileSheetUser] = useState<any>(null);
 
   const flatListRef = useRef<FlatList>(null);
+  const wasAtBottom = useRef<boolean>(true);
 
   const isGlobal = chatId === GLOBAL_CHAT_ID;
   const isZolbot = chatId?.startsWith('zolbot__');
@@ -64,9 +81,10 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!chatId) return;
-    getDoc(doc(db, 'chats', chatId)).then((snap) => {
+    const unsub = onSnapshot(doc(db, 'chats', chatId), (snap) => {
       if (snap.exists()) setChatData(snap.data());
-    }).catch(() => {});
+    }, () => {});
+    return unsub;
   }, [chatId]);
 
   useEffect(() => {
@@ -74,6 +92,21 @@ export default function ChatScreen() {
 
     const unsubMessages = subscribeToMessages(chatId, (msgs: any[]) => {
       setMessages(msgs);
+      setPendingMessages((prev) => {
+        const realIds = new Set(msgs.map((m: any) => m.id));
+        return prev.filter((p) => {
+          if (realIds.has(p.id)) return false;
+          const isDuplicate = msgs.some(
+            (m: any) =>
+              m.senderId === p.senderId &&
+              m.text === p.text &&
+              Math.abs(
+                (m.createdAt?.toDate?.()?.getTime?.() || 0) - p.sentAt
+              ) < 10000
+          );
+          return !isDuplicate;
+        });
+      });
     });
 
     const unsubPresence = subscribeToPresence(chatId, user.uid, (p: Record<string, any>) => {
@@ -81,6 +114,9 @@ export default function ChatScreen() {
     });
 
     markChatAsRead(chatId, user.uid).catch(() => {});
+    if (!isGlobal) {
+      markMessagesDelivered(chatId, user.uid).catch(() => {});
+    }
 
     return () => {
       unsubMessages();
@@ -94,6 +130,38 @@ export default function ChatScreen() {
       if (typingTimeout) clearTimeout(typingTimeout);
     };
   }, []);
+
+  useEffect(() => {
+    if (!chatData?.participantMeta || isGlobal || isGroup || isZolbot) return;
+    const otherUid = Object.keys(chatData.participantMeta).find((k) => k !== user?.uid);
+    if (!otherUid) return;
+    const unsub = subscribeToUsersPresence([otherUid], (p: Record<string, any>) => {
+      setOtherUserOnline(p[otherUid]?.online === true);
+    });
+    return unsub;
+  }, [chatData, isGlobal, isGroup, isZolbot, user]);
+
+  useEffect(() => {
+    if (!memberSearch.trim()) {
+      setMemberSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const { findUsersByEmailOrUsername } = await import('../../src/services/chatService');
+      const results = await findUsersByEmailOrUsername(memberSearch, user?.uid || '');
+      const existingParticipants = chatData?.participants || [];
+      setMemberSearchResults(results.filter((r: any) => !existingParticipants.includes(r.uid)));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [memberSearch]);
+
+  const getParticipants = () => {
+    if (!chatData?.participantMeta) return [];
+    return Object.entries(chatData.participantMeta).map(([uid, meta]) => ({
+      uid,
+      ...(meta as any),
+    }));
+  };
 
   const getOtherUser = () => {
     if (!chatData?.participantMeta || !user) return null;
@@ -124,15 +192,38 @@ export default function ChatScreen() {
     return 'Multiple people typing...';
   };
 
+  const getProfileImageForSender = (senderId: string) => {
+    if (chatData?.participantMeta?.[senderId]?.photoURL) {
+      return chatData.participantMeta[senderId].photoURL;
+    }
+    return null;
+  };
+
   const handleSend = async () => {
     if (!text.trim() || !userProfile || !chatId) return;
     const msgText = text.trim();
     setText('');
-    setSending(true);
+    setShowMentions(false);
 
+    const tempId = `pending_${Date.now()}_${Math.random()}`;
+    const pendingMsg = {
+      id: tempId,
+      text: msgText,
+      senderId: user?.uid,
+      senderUsername: userProfile.username,
+      senderPhotoURL: userProfile.photoURL,
+      status: 'pending',
+      createdAt: null,
+      sentAt: Date.now(),
+    };
+    setPendingMessages((prev) => [...prev, pendingMsg]);
+    wasAtBottom.current = true;
+
+    setSending(true);
     try {
       await sendMessage(chatId, userProfile, msgText);
     } catch (e: any) {
+      setPendingMessages((prev) => prev.filter((p) => p.id !== tempId));
       Alert.alert('Error', 'Failed to send message');
     } finally {
       setSending(false);
@@ -159,7 +250,7 @@ export default function ChatScreen() {
     }
   };
 
-  const handleTyping = (value: string) => {
+  const handleTextChange = (value: string) => {
     setText(value);
     if (!chatId || !user) return;
 
@@ -173,6 +264,37 @@ export default function ChatScreen() {
     } else {
       setTyping(chatId, user.uid, false);
     }
+
+    const lastAt = value.lastIndexOf('@');
+    if (lastAt >= 0 && lastAt === value.length - 1) {
+      const participants = getParticipants();
+      const suggestions = [
+        { uid: 'zolbot', username: 'Zolbot', isBot: true },
+        ...participants.filter((p) => p.uid !== user?.uid && p.uid !== 'zolbot'),
+      ];
+      setMentionSuggestions(suggestions);
+      setShowMentions(true);
+    } else if (lastAt >= 0 && lastAt === value.length - 2) {
+      setShowMentions(false);
+    } else if (lastAt >= 0 && value.length > lastAt + 1) {
+      const query = value.substring(lastAt + 1).toLowerCase();
+      const participants = getParticipants();
+      const filtered = [
+        { uid: 'zolbot', username: 'Zolbot', isBot: true },
+        ...participants.filter((p) => p.uid !== user?.uid && p.uid !== 'zolbot'),
+      ].filter((p) => p.username?.toLowerCase().includes(query));
+      setMentionSuggestions(filtered);
+      setShowMentions(filtered.length > 0);
+    } else {
+      setShowMentions(false);
+    }
+  };
+
+  const handleMentionSelect = (mention: any) => {
+    const lastAt = text.lastIndexOf('@');
+    const before = text.substring(0, lastAt);
+    setText(`${before}@${mention.username} `);
+    setShowMentions(false);
   };
 
   const handleClearChat = async () => {
@@ -206,41 +328,114 @@ export default function ChatScreen() {
     ]);
   };
 
+  const handleAddMembers = async (newMembers: string[]) => {
+    if (!chatId || newMembers.length === 0) return;
+    try {
+      await addGroupMembers(chatId, newMembers);
+      setAddMemberVisible(false);
+      setMemberSearch('');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+    if (!chatId || !user) return;
+    Alert.alert('Leave Group', 'Are you sure you want to leave this group?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Leave',
+        style: 'destructive',
+        onPress: async () => {
+          await leaveGroup(chatId, user.uid);
+          router.back();
+        },
+      },
+    ]);
+  };
+
   const formatTime = (createdAt: any) => {
     if (!createdAt) return '';
     let date: Date;
-    if (createdAt.toDate) date = createdAt.toDate();
-    else if (createdAt.seconds) date = new Date(createdAt.seconds * 1000);
+    if (createdAt?.toDate) date = createdAt.toDate();
+    else if (createdAt?.seconds) date = new Date(createdAt.seconds * 1000);
     else date = new Date(createdAt);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const allMessages = [...messages, ...pendingMessages].sort((a, b) => {
+    const aTime = a.createdAt?.toDate?.()?.getTime?.() || a.sentAt || 0;
+    const bTime = b.createdAt?.toDate?.()?.getTime?.() || b.sentAt || 0;
+    return aTime - bTime;
+  });
+
   const filteredMessages = searchQuery.trim()
-    ? messages.filter((m) =>
+    ? allMessages.filter((m) =>
         m.text?.toLowerCase().includes(searchQuery.toLowerCase())
       )
-    : messages;
+    : allMessages;
 
   const renderMessage = ({ item }: { item: any }) => {
     const isOwn = item.senderId === user?.uid;
     const isBotMsg = item.senderId === 'zolbot';
+    const isPending = item.status === 'pending';
+
+    const handleAvatarPress = () => {
+      if (!item.senderId || item.senderId === user?.uid) return;
+      const meta = chatData?.participantMeta?.[item.senderId];
+      if (meta) {
+        setProfileSheetUser({ uid: item.senderId, ...meta });
+        setProfileSheetVisible(true);
+      } else if (item.senderId === 'zolbot') {
+        setProfileSheetUser({ uid: 'zolbot', username: 'Zolbot', isBot: true });
+        setProfileSheetVisible(true);
+      }
+    };
 
     return (
       <MessageBubble
         text={item.text || ''}
         senderName={item.senderUsername || 'User'}
-        senderPhotoURL={item.senderPhotoURL}
-        timestamp={formatTime(item.createdAt)}
+        senderPhotoURL={getProfileImageForSender(item.senderId) || item.senderPhotoURL}
+        timestamp={isPending ? '' : formatTime(item.createdAt)}
         isOwn={isOwn}
         isBot={isBotMsg}
-        isPending={item.status === 'pending'}
+        isPending={isPending}
+        isGroup={isGroup || isGlobal}
+        messageStatus={item.status}
         imageUrl={item.imageUrl}
         onImagePress={(uri) => setImageViewerUri(uri)}
+        onAvatarPress={handleAvatarPress}
+        senderUid={item.senderId}
       />
     );
   };
 
   const typingText = getTypingText();
+
+  const getProfileSheetSubtitle = () => {
+    if (profileSheetUser) return profileSheetUser.email || '';
+    if (isGlobal) return 'Public chat room — everyone can join';
+    if (isZolbot) return 'AI assistant built into Zolchat';
+    if (isGroup) return `${chatData?.participants?.length || 0} members`;
+    const other = getOtherUser();
+    return other?.email || '';
+  };
+
+  const getProfileSheetAvatar = () => {
+    if (profileSheetUser) return profileSheetUser.photoURL || null;
+    return getChatAvatar();
+  };
+
+  const getProfileSheetTitle = () => {
+    if (profileSheetUser) return profileSheetUser.username || 'User';
+    return getChatTitle();
+  };
+
+  const getProfileSheetIsBot = () => {
+    if (profileSheetUser) return profileSheetUser.isBot === true;
+    return isZolbot;
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.surface }]} edges={['top']}>
@@ -250,44 +445,79 @@ export default function ChatScreen() {
         keyboardVerticalOffset={0}
       >
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <MaterialIcons name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => setProfileSheetVisible(true)}
+        >
+          <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+              <MaterialIcons name="arrow-back" size={24} color={colors.text} />
+            </TouchableOpacity>
 
-          <View style={styles.headerInfo}>
-            <Avatar uri={getChatAvatar()} size={36} isBot={isZolbot} />
-            <View style={styles.headerText}>
-              <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
-                {isGlobal ? '🌍 ' : ''}{getChatTitle()}
-              </Text>
-              {typingText && (
-                <Text style={[styles.typingText, { color: colors.primary }]} numberOfLines={1}>
-                  {typingText}
-                </Text>
+            <View style={styles.headerInfo}>
+              {isGlobal ? (
+                <View style={[styles.headerAvatar, { backgroundColor: colors.primary + '20' }]}>
+                  <MaterialIcons name="public" size={22} color={colors.primary} />
+                </View>
+              ) : (
+                <View>
+                  <Avatar uri={getChatAvatar()} size={36} isBot={isZolbot} />
+                  {!isGlobal && !isZolbot && !isGroup && otherUserOnline && (
+                    <View style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E', borderWidth: 2, borderColor: colors.surface }} />
+                  )}
+                </View>
               )}
+              <View style={styles.headerText}>
+                <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+                  {getChatTitle()}
+                </Text>
+                {typingText ? (
+                  <Text style={[styles.typingText, { color: colors.primary }]} numberOfLines={1}>
+                    {typingText}
+                  </Text>
+                ) : isGroup && chatData?.participants ? (
+                  <Text style={[styles.memberCount, { color: colors.textTertiary }]} numberOfLines={1}>
+                    {chatData.participants.length} members
+                  </Text>
+                ) : !isGlobal && !isZolbot && !isGroup ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    {otherUserOnline && <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' }} />}
+                    <Text style={[styles.memberCount, { color: otherUserOnline ? '#22C55E' : colors.textTertiary }]} numberOfLines={1}>
+                      {otherUserOnline ? 'Online' : 'Offline'}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             </View>
+
+            <TouchableOpacity onPress={() => setSearchVisible(true)} style={styles.headerBtn}>
+              <MaterialIcons name="search" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.headerBtn}>
+              <MaterialIcons name="more-vert" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity onPress={() => setSearchVisible(true)} style={styles.headerBtn}>
-            <MaterialIcons name="search" size={22} color={colors.textSecondary} />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.headerBtn}>
-            <MaterialIcons name="more-vert" size={22} color={colors.textSecondary} />
-          </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
 
         {/* In-chat search bar */}
         {searchVisible && (
           <View style={[styles.searchBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-            <View style={[styles.searchInput, { backgroundColor: colors.inputBackground }]}>
+            <View style={[styles.searchInputContainer, { backgroundColor: colors.inputBackground }]}>
               <MaterialIcons name="search" size={16} color={colors.textTertiary} />
-              <Text
-                style={[styles.searchInputText, { color: searchQuery ? colors.text : colors.textTertiary }]}
-              >
-                {searchQuery || 'Search messages...'}
-              </Text>
+              <TextInput
+                style={[styles.searchTextInput, { color: colors.text }]}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search messages..."
+                placeholderTextColor={colors.textTertiary}
+                autoFocus
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <MaterialIcons name="close" size={16} color={colors.textTertiary} />
+                </TouchableOpacity>
+              )}
             </View>
             <TouchableOpacity onPress={() => { setSearchVisible(false); setSearchQuery(''); }}>
               <MaterialIcons name="close" size={20} color={colors.textSecondary} />
@@ -303,8 +533,22 @@ export default function ChatScreen() {
             keyExtractor={(item) => item.id || Math.random().toString()}
             renderItem={renderMessage}
             contentContainerStyle={styles.messagesList}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            onScrollBeginDrag={() => { wasAtBottom.current = false; Keyboard.dismiss(); }}
+            onScrollEndDrag={(e) => {
+              const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+              const isAtBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 50;
+              wasAtBottom.current = isAtBottom;
+            }}
+            onContentSizeChange={() => {
+              if (wasAtBottom.current) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+              }
+            }}
+            onLayout={() => {
+              if (wasAtBottom.current) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+              }
+            }}
             ListEmptyComponent={
               <View style={styles.emptyChat}>
                 <Text style={[styles.emptyChatText, { color: colors.textTertiary }]}>
@@ -315,10 +559,37 @@ export default function ChatScreen() {
           />
         </View>
 
+        {/* Mention Suggestions */}
+        {showMentions && mentionSuggestions.length > 0 && (
+          <View style={[styles.mentionContainer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+            <FlatList
+              data={mentionSuggestions}
+              keyExtractor={(item) => item.uid}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.mentionChip, { backgroundColor: colors.primary + '15' }]}
+                  onPress={() => handleMentionSelect(item)}
+                >
+                  {item.isBot ? (
+                    <MaterialIcons name="smart-toy" size={16} color={colors.primary} />
+                  ) : (
+                    <Avatar uri={item.photoURL} size={20} />
+                  )}
+                  <Text style={[styles.mentionChipText, { color: colors.primary }]}>
+                    @{item.username}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
+
         {/* Message Input */}
         <MessageInput
           value={text}
-          onChangeText={handleTyping}
+          onChangeText={handleTextChange}
           onSend={handleSend}
           onImagePick={handleImageSend}
           sending={sending}
@@ -339,12 +610,173 @@ export default function ChatScreen() {
                 <MaterialIcons name="delete-sweep" size={20} color={colors.danger} />
                 <Text style={[styles.menuItemText, { color: colors.danger }]}>Clear Chat</Text>
               </TouchableOpacity>
+              {isGroup && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => { setMenuVisible(false); setAddMemberVisible(true); }}
+                  >
+                    <MaterialIcons name="person-add" size={20} color={colors.primary} />
+                    <Text style={[styles.menuItemText, { color: colors.text }]}>Add Members</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                    onPress={handleLeaveGroup}
+                  >
+                    <MaterialIcons name="exit-to-app" size={20} color={colors.danger} />
+                    <Text style={[styles.menuItemText, { color: colors.danger }]}>Leave Group</Text>
+                  </TouchableOpacity>
+                </>
+              )}
               <TouchableOpacity style={styles.menuItem} onPress={handleDeleteChat}>
                 <MaterialIcons name="delete-forever" size={20} color={colors.danger} />
                 <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete Chat</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
+        </Modal>
+
+        {/* Profile Sheet Modal */}
+        <Modal visible={profileSheetVisible} transparent animationType="slide">
+          <TouchableOpacity
+            style={styles.profileSheetOverlay}
+            activeOpacity={1}
+            onPress={() => { setProfileSheetVisible(false); setProfileSheetUser(null); }}
+          >
+            <View style={[styles.profileSheet, { backgroundColor: colors.surface }]}>
+              <View style={[styles.profileSheetHandle, { backgroundColor: colors.textTertiary }]} />
+
+              <View style={styles.profileSheetContent}>
+                {profileSheetUser ? (
+                  <Avatar uri={getProfileSheetAvatar()} size={90} isBot={getProfileSheetIsBot()} />
+                ) : isGlobal ? (
+                  <View style={[styles.profileSheetAvatar, { backgroundColor: colors.primary + '20' }]}>
+                    <MaterialIcons name="public" size={50} color={colors.primary} />
+                  </View>
+                ) : (
+                  <Avatar uri={getProfileSheetAvatar()} size={90} isBot={getProfileSheetIsBot()} />
+                )}
+
+                <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>
+                  {getProfileSheetTitle()}
+                </Text>
+                <Text style={[styles.profileSubtitle, { color: colors.textSecondary }]}>
+                  {getProfileSheetSubtitle()}
+                </Text>
+
+                {!profileSheetUser && !isGlobal && !isGroup && !isZolbot && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    {otherUserOnline && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />}
+                    <Text style={{ color: otherUserOnline ? '#22C55E' : colors.textTertiary, fontSize: 13, fontWeight: '600' }}>
+                      {otherUserOnline ? 'Online' : 'Offline'}
+                    </Text>
+                  </View>
+                )}
+
+                {profileSheetUser && !getProfileSheetIsBot() && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    {otherUserOnline && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />}
+                    <Text style={{ color: otherUserOnline ? '#22C55E' : colors.textTertiary, fontSize: 13, fontWeight: '600' }}>
+                      {otherUserOnline ? 'Online' : 'Offline'}
+                    </Text>
+                  </View>
+                )}
+
+                {isGlobal && (
+                  <View style={[styles.profileInfoRow, { backgroundColor: colors.inputBackground }]}>
+                    <MaterialIcons name="public" size={20} color={colors.primary} />
+                    <Text style={[styles.profileInfoText, { color: colors.text }]}>
+                      Anyone in the app can send messages here
+                    </Text>
+                  </View>
+                )}
+
+                {isGroup && chatData?.participants && (
+                  <View style={styles.profileMembersSection}>
+                    <Text style={[styles.profileMembersTitle, { color: colors.textSecondary }]}>
+                      Members
+                    </Text>
+                    {getParticipants().map((member) => (
+                      <View
+                        key={member.uid}
+                        style={[styles.profileMemberRow, { borderBottomColor: colors.border }]}
+                      >
+                        <Avatar uri={member.photoURL} size={36} isBot={member.isBot} />
+                        <View style={styles.profileMemberInfo}>
+                          <Text style={[styles.profileMemberName, { color: colors.text }]}>
+                            {member.username}
+                          </Text>
+                          {chatData.groupAdmins?.includes(member.uid) && (
+                            <Text style={[styles.profileMemberRole, { color: colors.primary }]}>
+                              Admin
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {!profileSheetUser && !isGlobal && !isGroup && !isZolbot && (
+                  <View style={[styles.profileInfoRow, { backgroundColor: colors.inputBackground }]}>
+                    <MaterialIcons name="email" size={20} color={colors.textTertiary} />
+                    <Text style={[styles.profileInfoText, { color: colors.text }]}>
+                      {getOtherUser()?.email}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Add Members Modal */}
+        <Modal visible={addMemberVisible} transparent animationType="slide">
+          <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
+            <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
+                <TouchableOpacity onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}>
+                  <MaterialIcons name="close" size={24} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+              <View style={[styles.searchInputContainer, { backgroundColor: colors.inputBackground, marginBottom: 12 }]}>
+                <MaterialIcons name="search" size={16} color={colors.textTertiary} />
+                <TextInput
+                  style={[styles.searchTextInput, { color: colors.text }]}
+                  value={memberSearch}
+                  onChangeText={setMemberSearch}
+                  placeholder="Search users..."
+                  placeholderTextColor={colors.textTertiary}
+                />
+              </View>
+              <FlatList
+                data={memberSearchResults}
+                keyExtractor={(item) => item.uid}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.searchResult, { borderBottomColor: colors.border }]}
+                    onPress={() => handleAddMembers([item.uid])}
+                  >
+                    <Avatar uri={item.photoURL} size={40} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.searchResultName, { color: colors.text }]}>
+                        {item.username}
+                      </Text>
+                    </View>
+                    <MaterialIcons name="add-circle" size={24} color={colors.primary} />
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={
+                  memberSearch.length > 0 ? (
+                    <Text style={[styles.noResults, { color: colors.textTertiary }]}>
+                      No users found
+                    </Text>
+                  ) : null
+                }
+              />
+            </View>
+          </View>
         </Modal>
 
         {/* Image Viewer Modal */}
@@ -398,6 +830,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  headerAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerText: {
     flex: 1,
   },
@@ -406,6 +845,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   typingText: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  memberCount: {
     fontSize: 12,
     marginTop: 1,
   },
@@ -420,7 +863,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
-  searchInput: {
+  searchInputContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -429,8 +872,10 @@ const styles = StyleSheet.create({
     height: 36,
     gap: 6,
   },
-  searchInputText: {
+  searchTextInput: {
+    flex: 1,
     fontSize: 14,
+    padding: 0,
   },
   messagesContainer: {
     flex: 1,
@@ -448,6 +893,24 @@ const styles = StyleSheet.create({
   emptyChatText: {
     fontSize: 15,
   },
+  mentionContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  mentionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+    gap: 4,
+  },
+  mentionChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   menuOverlay: {
     flex: 1,
     justifyContent: 'flex-start',
@@ -457,7 +920,7 @@ const styles = StyleSheet.create({
   },
   menuDropdown: {
     borderRadius: 12,
-    minWidth: 180,
+    minWidth: 200,
     overflow: 'hidden',
     elevation: 8,
     shadowColor: '#000',
@@ -476,6 +939,128 @@ const styles = StyleSheet.create({
   menuItemText: {
     fontSize: 15,
     fontWeight: '500',
+  },
+  profileSheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  profileSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    paddingBottom: 32,
+    maxHeight: '70%',
+  },
+  profileSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+    opacity: 0.3,
+  },
+  profileSheetAvatar: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileSheetContent: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  profileName: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  profileSubtitle: {
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  profileInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 10,
+    marginTop: 8,
+  },
+  profileInfoText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  profileMembersSection: {
+    width: '100%',
+    marginTop: 16,
+  },
+  profileMembersTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  profileMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  profileMemberInfo: {
+    flex: 1,
+  },
+  profileMemberName: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  profileMemberRole: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
+    maxHeight: '70%',
+    paddingHorizontal: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  searchResult: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  searchResultName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  noResults: {
+    textAlign: 'center',
+    paddingTop: 40,
+    fontSize: 15,
   },
   imageViewerOverlay: {
     flex: 1,

@@ -408,16 +408,30 @@ export function subscribeToMessages(chatId, onData) {
 export async function markChatAsRead(chatId, uid) {
   const chatRef = doc(db, 'chats', chatId);
   try {
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) return;
+    const chatData = chatSnap.data();
+    const lastRead = chatData.participantMeta?.[uid]?.lastRead;
+
     await updateDoc(chatRef, {
-      [`participantMeta.${uid}.lastRead`]: new Date(),
+      [`participantMeta.${uid}.lastRead`]: serverTimestamp(),
     });
+
     const msgsRef = collection(db, 'chats', chatId, 'messages');
-    const snap = await getDocs(query(msgsRef, orderBy('createdAt', 'desc'), limit(50)));
+    let msgQuery;
+    if (lastRead) {
+      const lastReadDate = lastRead?.toDate ? lastRead.toDate() : new Date(lastRead);
+      msgQuery = query(msgsRef, orderBy('createdAt', 'desc'), limit(50));
+    } else {
+      msgQuery = query(msgsRef, orderBy('createdAt', 'desc'), limit(50));
+    }
+
+    const snap = await getDocs(msgQuery);
     const batch = writeBatch(db);
     let count = 0;
     snap.forEach((docSnap) => {
       const data = docSnap.data();
-      if (data.senderId !== uid && data.status !== 'read' && count < 20) {
+      if (data.senderId !== uid && data.status !== 'read' && count < 30) {
         batch.update(doc(db, 'chats', chatId, 'messages', docSnap.id), { status: 'read' });
         count++;
       }
@@ -425,6 +439,25 @@ export async function markChatAsRead(chatId, uid) {
     if (count > 0) await batch.commit();
   } catch {
     // Chat may not exist yet
+  }
+}
+
+export async function markMessagesDelivered(chatId, uid) {
+  try {
+    const msgsRef = collection(db, 'chats', chatId, 'messages');
+    const snap = await getDocs(query(msgsRef, orderBy('createdAt', 'desc'), limit(30)));
+    const batch = writeBatch(db);
+    let count = 0;
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data.senderId !== uid && data.status === 'sent' && count < 20) {
+        batch.update(doc(db, 'chats', chatId, 'messages', docSnap.id), { status: 'delivered' });
+        count++;
+      }
+    });
+    if (count > 0) await batch.commit();
+  } catch {
+    // Best-effort
   }
 }
 
@@ -770,6 +803,49 @@ export function setTyping(chatId, uid, isTyping) {
     typing: isTyping,
     lastActive: new Date(),
   }, { merge: true });
+}
+
+export function setUserOnline(uid) {
+  if (!uid) return Promise.resolve();
+  return setDoc(doc(db, 'users', uid), {
+    online: true,
+    lastSeen: new Date(),
+  }, { merge: true });
+}
+
+export function setUserOffline(uid) {
+  if (!uid) return Promise.resolve();
+  return setDoc(doc(db, 'users', uid), {
+    online: false,
+    lastSeen: new Date(),
+  }, { merge: true });
+}
+
+export function subscribeToUsersPresence(uids, onPresenceChange) {
+  if (!uids || uids.length === 0) {
+    onPresenceChange({});
+    return () => {};
+  }
+  const uidsSet = new Set(uids);
+  const presenceMap = {};
+
+  const unsubs = [];
+  const chunkSize = 10;
+  for (let i = 0; i < uids.length; i += chunkSize) {
+    const chunk = uids.slice(i, i + chunkSize);
+    const q = query(collection(db, 'users'), where('__name__', 'in', chunk));
+    const unsub = onSnapshot(q, (snap) => {
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const lastSeenMs = data.lastSeen?.toDate?.()?.getTime?.() || 0;
+        const isOnline = data.online === true && lastSeenMs > 0 && (Date.now() - lastSeenMs < 120000);
+        presenceMap[docSnap.id] = { online: isOnline, lastSeen: data.lastSeen };
+      });
+      onPresenceChange({ ...presenceMap });
+    }, () => {});
+    unsubs.push(unsub);
+  }
+  return () => unsubs.forEach((u) => u());
 }
 
 export function subscribeToPresence(chatId, uid, onPresenceChange) {

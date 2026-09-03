@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -7,7 +7,9 @@ import {
   type User,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { AppState, type AppStateStatus } from 'react-native';
 import { auth, db } from '../services/firebase';
+import { setUserOnline, setUserOffline } from '../services/chatService';
 
 interface UserProfile {
   uid: string;
@@ -33,6 +35,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const appState = useRef(AppState.currentState);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    setUserOnline(user.uid).catch(() => {});
+    heartbeatRef.current = setInterval(() => {
+      setUserOnline(user.uid).catch(() => {});
+    }, 30000);
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active') {
+        setUserOnline(user.uid).catch(() => {});
+      } else {
+        setUserOffline(user.uid).catch(() => {});
+      }
+      appState.current = next;
+    });
+    return () => {
+      sub.remove();
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      setUserOffline(user.uid).catch(() => {});
+    };
+  }, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -84,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    if (user) await setUserOffline(user.uid).catch(() => {});
     await firebaseSignOut(auth);
     setUser(null);
     setUserProfile(null);

@@ -1,13 +1,15 @@
-import { ActivityIndicator, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
+import { ThemeProvider, useThemeContext } from '../src/contexts/ThemeContext';
 
 function RootLayoutNav() {
   const { user, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const { isDark } = useThemeContext();
 
   useEffect(() => {
     if (loading) return;
@@ -30,25 +32,29 @@ function RootLayoutNav() {
   }
 
   return (
-    <Stack>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-      <Stack.Screen
-        name="chat/[chatId]"
-        options={{
-          headerShown: false,
-          presentation: 'card',
-        }}
-      />
-    </Stack>
+    <>
+      <Stack>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="chat/[chatId]"
+          options={{
+            headerShown: false,
+            presentation: 'card',
+          }}
+        />
+      </Stack>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+    </>
   );
 }
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootLayoutNav />
-      <StatusBar style="auto" />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <RootLayoutNav />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

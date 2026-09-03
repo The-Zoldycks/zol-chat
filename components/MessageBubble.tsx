@@ -10,8 +10,12 @@ interface MessageBubbleProps {
   isOwn: boolean;
   isBot?: boolean;
   isPending?: boolean;
+  isGroup?: boolean;
+  messageStatus?: string;
   imageUrl?: string;
   onImagePress?: (uri: string) => void;
+  onAvatarPress?: () => void;
+  senderUid?: string;
 }
 
 export function MessageBubble({
@@ -22,21 +26,38 @@ export function MessageBubble({
   isOwn,
   isBot,
   isPending,
+  isGroup,
+  messageStatus,
   imageUrl,
   onImagePress,
+  onAvatarPress,
+  senderUid,
 }: MessageBubbleProps) {
   const colors = useThemeColors();
 
+  const statusIcon = () => {
+    if (!isOwn) return null;
+    if (isPending) return null;
+    if (messageStatus === 'read') return '✓✓';
+    if (messageStatus === 'delivered') return '✓✓';
+    if (messageStatus === 'sent') return '✓';
+    return null;
+  };
+
+  const statusColor = messageStatus === 'read' ? colors.primary : messageStatus === 'delivered' ? colors.primary : colors.textTertiary;
+
   return (
-    <View style={[styles.container, { opacity: isPending ? 0.5 : 1 }]}>
-      <View style={styles.avatarCol}>
+    <View style={[styles.container, { opacity: isPending ? 0.4 : 1 }]}>
+      <TouchableOpacity style={styles.avatarCol} onPress={onAvatarPress} activeOpacity={0.7}>
         <Avatar uri={senderPhotoURL} size={32} isBot={isBot} />
-      </View>
+      </TouchableOpacity>
 
       <View style={styles.contentCol}>
-        <Text style={[styles.senderName, { color: isBot ? colors.primary : colors.primaryLight }]}>
-          {senderName}
-        </Text>
+        <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.7}>
+          <Text style={[styles.senderName, { color: isBot ? colors.primary : colors.primaryLight }]}>
+            {senderName}
+          </Text>
+        </TouchableOpacity>
 
         {imageUrl && (
           <TouchableOpacity onPress={() => onImagePress?.(imageUrl)} activeOpacity={0.8}>
@@ -52,10 +73,17 @@ export function MessageBubble({
           <Text style={[styles.messageText, { color: colors.text }]}>{text}</Text>
         ) : null}
 
-        {timestamp && (
-          <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
-            {timestamp}
-          </Text>
+        {(timestamp || isOwn) && (
+          <View style={styles.timestampRow}>
+            <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
+              {timestamp}
+            </Text>
+            {isOwn && !isPending && statusIcon() && (
+              <Text style={[styles.status, { color: statusColor }]}>
+                {statusIcon()}
+              </Text>
+            )}
+          </View>
         )}
       </View>
     </View>
@@ -90,8 +118,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 4,
   },
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
   timestamp: {
     fontSize: 11,
-    marginTop: 2,
+  },
+  status: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

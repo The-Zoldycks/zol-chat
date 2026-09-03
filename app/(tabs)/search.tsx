@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -15,6 +16,8 @@ import { Avatar } from '../../components/Avatar';
 import {
   findUsersByEmailOrUsername,
   startOrOpenChat,
+  subscribeToChats,
+  subscribeToUsersPresence,
   GLOBAL_CHAT_ID,
 } from '../../src/services/chatService';
 
@@ -26,6 +29,35 @@ export default function SearchScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [recentChats, setRecentChats] = useState<any[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<Record<string, { online: boolean }>>({});
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeToChats(user.uid, (chatList: any[]) => {
+      const recent = chatList
+        .filter((c) => !c.isGlobal && !c.id?.startsWith('zolbot__'))
+        .slice(0, 10);
+      setRecentChats(recent);
+    });
+    return unsub;
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const allUids = new Set<string>();
+    recentChats.forEach((chat) => {
+      if (chat.participantMeta) {
+        Object.keys(chat.participantMeta).forEach((uid) => {
+          if (uid !== user.uid) allUids.add(uid);
+        });
+      }
+    });
+    searchResults.forEach((r) => { if (r.uid !== user?.uid) allUids.add(r.uid); });
+    if (allUids.size === 0) return;
+    const unsub = subscribeToUsersPresence([...allUids], setOnlineUsers);
+    return unsub;
+  }, [user, recentChats, searchResults]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -55,6 +87,27 @@ export default function SearchScreen() {
     } catch {}
   };
 
+  const getRecentChatName = (chat: any) => {
+    if (chat.groupName) return chat.groupName;
+    if (chat.participantMeta) {
+      const other = Object.entries(chat.participantMeta).find(
+        ([key]) => key !== user?.uid
+      );
+      if (other) return (other[1] as any)?.username || 'User';
+    }
+    return 'Chat';
+  };
+
+  const getRecentChatAvatar = (chat: any) => {
+    if (chat.participantMeta) {
+      const other = Object.entries(chat.participantMeta).find(
+        ([key]) => key !== user?.uid
+      );
+      if (other) return (other[1] as any)?.photoURL || null;
+    }
+    return null;
+  };
+
   const quickAccess = [
     {
       uid: 'zolbot',
@@ -72,8 +125,28 @@ export default function SearchScreen() {
     },
   ];
 
+  const recentAsUsers = recentChats.map((chat) => {
+    const meta = chat.participantMeta || {};
+    const entries = Object.entries(meta);
+    const other = entries.find(([key]) => key !== user?.uid) as [string, any] | undefined;
+    return {
+      uid: other?.[0] || chat.id,
+      username: getRecentChatName(chat),
+      email: other?.[1]?.email || '',
+      photoURL: getRecentChatAvatar(chat),
+      chatId: chat.id,
+      isRecent: true,
+    };
+  });
+
+  const defaultList = [...quickAccess, ...recentAsUsers];
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <View style={styles.headerSection}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Search</Text>
+      </View>
+
       <View style={styles.searchContainer}>
         <SearchBar
           value={searchQuery}
@@ -82,37 +155,59 @@ export default function SearchScreen() {
         />
       </View>
 
-      {!searchQuery.trim() && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Quick Access</Text>
-          {quickAccess.map((item) => (
-            <TouchableOpacity
-              key={item.uid}
-              style={[styles.resultItem, { borderBottomColor: colors.border }]}
-              onPress={() => handleStartChat(item)}
-            >
-              <View style={[styles.resultAvatar, { backgroundColor: colors.inputBackground }]}>
-                <MaterialIcons
-                  name={item.isBot ? 'smart-toy' : 'public'}
-                  size={24}
-                  color={colors.primary}
-                />
-              </View>
-              <View style={styles.resultInfo}>
-                <Text style={[styles.resultName, { color: item.isGlobal ? colors.success : colors.text }]}>
-                  {item.isGlobal && '🌍 '}{item.username}
-                </Text>
-                <Text style={[styles.resultSub, { color: colors.textSecondary }]}>
-                  {item.email}
-                </Text>
-              </View>
-              <MaterialIcons name="chevron-right" size={22} color={colors.textTertiary} />
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {searchQuery.trim() ? (
+      {!searchQuery.trim() ? (
+        <FlatList
+          data={defaultList}
+          keyExtractor={(item) => item.uid}
+          ListHeaderComponent={
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+              {recentAsUsers.length > 0 ? 'Recent' : 'Quick Access'}
+            </Text>
+          }
+          renderItem={({ item }) => {
+            const recentItem = item as any;
+            const isOnline = recentItem.uid ? onlineUsers[recentItem.uid]?.online === true : false;
+            return (
+              <TouchableOpacity
+                style={[styles.resultItem, { borderBottomColor: colors.border }]}
+                onPress={() => {
+                  if (recentItem.isRecent && recentItem.chatId) {
+                    router.push(`/chat/${recentItem.chatId}`);
+                  } else {
+                    handleStartChat(item);
+                  }
+                }}
+              >
+                {recentItem.isBot ? (
+                  <View style={[styles.resultAvatar, { backgroundColor: colors.primary + '20' }]}>
+                    <MaterialIcons name="smart-toy" size={24} color={colors.primary} />
+                  </View>
+                ) : recentItem.isGlobal ? (
+                  <View style={[styles.resultAvatar, { backgroundColor: colors.primary + '20' }]}>
+                    <MaterialIcons name="public" size={24} color={colors.primary} />
+                  </View>
+                ) : (
+                  <View>
+                    <Avatar uri={item.photoURL} size={44} />
+                    {isOnline && (
+                      <View style={[styles.onlineDot, { backgroundColor: '#22C55E' }]} />
+                    )}
+                  </View>
+                )}
+                <View style={styles.resultInfo}>
+                  <Text style={[styles.resultName, { color: colors.text }]}>
+                    {item.username}
+                  </Text>
+                  <Text style={[styles.resultSub, { color: colors.textSecondary }]}>
+                    {item.email}
+                  </Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={22} color={colors.textTertiary} />
+              </TouchableOpacity>
+            );
+          }}
+        />
+      ) : (
         <FlatList
           data={searchResults}
           keyExtractor={(item) => item.uid}
@@ -121,7 +216,12 @@ export default function SearchScreen() {
               style={[styles.resultItem, { borderBottomColor: colors.border }]}
               onPress={() => handleStartChat(item)}
             >
-              <Avatar uri={item.photoURL} size={44} isBot={item.isBot} />
+              <View>
+                <Avatar uri={item.photoURL} size={44} isBot={item.isBot} />
+                {onlineUsers[item.uid]?.online === true && (
+                  <View style={[styles.onlineDot, { backgroundColor: '#22C55E' }]} />
+                )}
+              </View>
               <View style={styles.resultInfo}>
                 <Text style={[styles.resultName, { color: colors.text }]}>
                   {item.username}
@@ -143,18 +243,8 @@ export default function SearchScreen() {
             )
           }
         />
-      ) : (
-        <View style={styles.emptyState}>
-          <MaterialIcons name="person-search" size={56} color={colors.textTertiary} />
-          <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>
-            Find People
-          </Text>
-          <Text style={[styles.emptySub, { color: colors.textTertiary }]}>
-            Search for users by username or email
-          </Text>
-        </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -162,20 +252,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  section: {
+  headerSection: {
     paddingHorizontal: 16,
     paddingTop: 8,
+    paddingBottom: 12,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  searchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 4,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   resultItem: {
     flexDirection: 'row',
@@ -192,6 +290,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  onlineDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#FFF',
+  },
   resultInfo: {
     flex: 1,
   },
@@ -207,18 +315,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingTop: 40,
     fontSize: 15,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  emptySub: {
-    fontSize: 14,
   },
 });

@@ -10,10 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useThemeColors } from '../../src/hooks/useTheme';
+import { useThemeContext } from '../../src/contexts/ThemeContext';
 import { Avatar } from '../../components/Avatar';
 import { uploadToCloudinary } from '../../src/services/cloudinaryService';
 import { clearAllMessageCaches } from '../../src/services/localMessageCache';
@@ -21,6 +23,7 @@ import { clearAllMessageCaches } from '../../src/services/localMessageCache';
 export default function ProfileScreen() {
   const { userProfile, updateProfile, signOut } = useAuth();
   const colors = useThemeColors();
+  const { mode, setMode } = useThemeContext();
 
   const [editing, setEditing] = useState(false);
   const [username, setUsername] = useState(userProfile?.username || '');
@@ -74,12 +77,23 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const themeOptions = [
+    { key: 'system' as const, icon: 'phone-android', label: 'System' },
+    { key: 'light' as const, icon: 'light-mode', label: 'Light' },
+    { key: 'dark' as const, icon: 'dark-mode', label: 'Dark' },
+  ];
+
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.headerSection}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
+        </View>
+
         <View style={styles.avatarSection}>
           <TouchableOpacity onPress={handlePickImage} activeOpacity={0.8}>
             <Avatar uri={userProfile?.photoURL} size={100} />
@@ -124,6 +138,43 @@ export default function ProfileScreen() {
           <Text style={[styles.cardValue, { color: colors.text }]}>{userProfile?.email}</Text>
         </View>
 
+        <View style={[styles.card, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.cardLabel, { color: colors.textSecondary }]}>Theme</Text>
+          <View style={styles.themeBar}>
+            {themeOptions.map((opt) => {
+              const isActive = mode === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.themeOption,
+                    {
+                      backgroundColor: isActive ? colors.primary : colors.inputBackground,
+                      borderColor: isActive ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setMode(opt.key)}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons
+                    name={opt.icon as any}
+                    size={20}
+                    color={isActive ? '#FFFFFF' : colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.themeOptionLabel,
+                      { color: isActive ? '#FFFFFF' : colors.textSecondary },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
         <TouchableOpacity
           style={[styles.logoutBtn, { borderColor: colors.danger }]}
           onPress={handleLogout}
@@ -132,7 +183,8 @@ export default function ProfileScreen() {
           <Text style={[styles.logoutText, { color: colors.danger }]}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -140,11 +192,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  flex: {
+    flex: 1,
+  },
   scrollContent: {
     alignItems: 'center',
-    paddingTop: 24,
     paddingHorizontal: 20,
     gap: 16,
+  },
+  headerSection: {
+    width: '100%',
+    paddingTop: 8,
+    paddingBottom: 12,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '800',
   },
   avatarSection: {
     alignItems: 'center',
@@ -198,6 +262,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  themeBar: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  themeOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+    borderWidth: 1,
+  },
+  themeOptionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -207,7 +290,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1.5,
     gap: 8,
-    marginTop: 16,
+    marginTop: 8,
+    marginBottom: 24,
   },
   logoutText: {
     fontSize: 17,

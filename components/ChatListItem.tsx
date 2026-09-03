@@ -11,8 +11,11 @@ interface ChatListItemProps {
   avatarUri?: string | null;
   isBot?: boolean;
   isGlobal?: boolean;
+  isGroup?: boolean;
   isOnline?: boolean;
   onPress: () => void;
+  onNamePress?: () => void;
+  onAvatarPress?: () => void;
 }
 
 export function ChatListItem({
@@ -23,8 +26,11 @@ export function ChatListItem({
   avatarUri,
   isBot,
   isGlobal,
+  isGroup,
   isOnline,
   onPress,
+  onNamePress,
+  onAvatarPress,
 }: ChatListItemProps) {
   const colors = useThemeColors();
 
@@ -34,21 +40,46 @@ export function ChatListItem({
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <View style={styles.avatarWrapper}>
-        <Avatar uri={avatarUri} size={52} isBot={isBot} />
+      <TouchableOpacity
+        style={styles.avatarWrapper}
+        onPress={onAvatarPress || onPress}
+        activeOpacity={0.7}
+      >
+        {isGlobal ? (
+          <View style={[styles.globalAvatar, { backgroundColor: colors.primary + '20' }]}>
+            <MaterialIcons name="public" size={28} color={colors.primary} />
+          </View>
+        ) : isGroup ? (
+          <View style={[styles.globalAvatar, { backgroundColor: colors.primary + '20' }]}>
+            <MaterialIcons name="group" size={28} color={colors.primary} />
+          </View>
+        ) : (
+          <Avatar uri={avatarUri} size={52} isBot={isBot} />
+        )}
         {isOnline && (
           <View style={[styles.onlineDot, { backgroundColor: colors.online }]} />
         )}
-      </View>
+      </TouchableOpacity>
 
       <View style={styles.content}>
         <View style={styles.topRow}>
-          <Text
-            style={[styles.name, { color: isGlobal ? colors.success : colors.text }]}
-            numberOfLines={1}
-          >
-            {isGlobal && '🌍 '}{name}
-          </Text>
+          {onNamePress ? (
+            <TouchableOpacity onPress={onNamePress} activeOpacity={0.6}>
+              <Text
+                style={[styles.name, { color: colors.text }]}
+                numberOfLines={1}
+              >
+                {name}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <Text
+              style={[styles.name, { color: colors.text }]}
+              numberOfLines={1}
+            >
+              {name}
+            </Text>
+          )}
           {timestamp && (
             <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
               {timestamp}
@@ -85,6 +116,13 @@ const styles = StyleSheet.create({
   },
   avatarWrapper: {
     position: 'relative',
+  },
+  globalAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   onlineDot: {
     position: 'absolute',

@@ -10,17 +10,15 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textTertiary,
-        tabBarStyle: {
+          tabBarStyle: {
           backgroundColor: colors.tabBar,
           borderTopColor: colors.tabBarBorder,
+          height: 60,
+          paddingTop: 6,
+          paddingBottom: 8,
         },
-        headerStyle: {
-          backgroundColor: colors.headerBackground,
-        },
-        headerTintColor: colors.text,
-        headerTitleStyle: {
-          fontWeight: '700',
-        },
+        headerShown: false,
+        tabBarShowLabel: false,
       }}
     >
       <Tabs.Screen
@@ -28,7 +26,7 @@ export default function TabLayout() {
         options={{
           title: 'Chats',
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="chat-bubble" size={size} color={color} />
+            <MaterialIcons name="chat-bubble" size={28} color={color} />
           ),
         }}
       />
@@ -37,7 +35,7 @@ export default function TabLayout() {
         options={{
           title: 'Search',
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="search" size={size} color={color} />
+            <MaterialIcons name="search" size={28} color={color} />
           ),
         }}
       />
@@ -46,7 +44,7 @@ export default function TabLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="person" size={size} color={color} />
+            <MaterialIcons name="person" size={28} color={color} />
           ),
         }}
       />

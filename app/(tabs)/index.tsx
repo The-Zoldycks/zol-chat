@@ -8,12 +8,19 @@ import {
   Alert,
   Modal,
   Text,
+  TextInput,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useThemeColors } from '../../src/hooks/useTheme';
 import { ChatListItem } from '../../components/ChatListItem';
+import { Avatar } from '../../components/Avatar';
 import { SearchBar } from '../../components/SearchBar';
 import {
   subscribeToChats,
@@ -22,7 +29,12 @@ import {
   findUsersByEmailOrUsername,
   startOrOpenChat,
   createGroupChat,
+  GLOBAL_CHAT_ID,
+  subscribeToUsersPresence,
 } from '../../src/services/chatService';
+import { uploadToCloudinary } from '../../src/services/cloudinaryService';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../src/services/firebase';
 
 export default function ChatsScreen() {
   const { user, userProfile } = useAuth();
@@ -40,19 +52,54 @@ export default function ChatsScreen() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [groupName, setGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [groupImage, setGroupImage] = useState<string | null>(null);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [profileSheetChat, setProfileSheetChat] = useState<any>(null);
+  const [onlineUsers, setOnlineUsers] = useState<Record<string, { online: boolean }>>({});
 
   useEffect(() => {
     if (!user) return;
     ensureGlobalChatExists().catch(() => {});
 
-    const unsub = subscribeToChats(user.uid, async (chatList: any[]) => {
-      setChats(chatList);
-      const counts = await getUnreadCounts(user.uid, chatList);
+    let globalChatData: any = null;
+
+    const unsubChats = subscribeToChats(user.uid, async (chatList: any[]) => {
+      const allChats = globalChatData ? [globalChatData, ...chatList] : chatList;
+      setChats(allChats);
+      const counts = await getUnreadCounts(user.uid, allChats);
       setUnreadCounts(counts as Record<string, number>);
     });
 
-    return unsub;
+    const unsubGlobal = onSnapshot(doc(db, 'chats', GLOBAL_CHAT_ID), (snap) => {
+      if (snap.exists()) {
+        globalChatData = { id: GLOBAL_CHAT_ID, ...snap.data() };
+        setChats((prev) => {
+          const without = prev.filter((c) => c.id !== GLOBAL_CHAT_ID);
+          return [globalChatData, ...without];
+        });
+      }
+    }, () => {});
+
+    return () => {
+      unsubChats();
+      unsubGlobal();
+    };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || chats.length === 0) return;
+    const uids = new Set<string>();
+    chats.forEach((chat) => {
+      if (chat.participantMeta) {
+        Object.keys(chat.participantMeta).forEach((uid) => {
+          if (uid !== user.uid && uid !== 'zolbot') uids.add(uid);
+        });
+      }
+    });
+    if (uids.size === 0) return;
+    const unsub = subscribeToUsersPresence([...uids], setOnlineUsers);
+    return unsub;
+  }, [user, chats]);
 
   useEffect(() => {
     if (!userSearch.trim()) {
@@ -66,9 +113,19 @@ export default function ChatsScreen() {
     return () => clearTimeout(timer);
   }, [userSearch]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!user || chats.length === 0) return;
+      getUnreadCounts(user.uid, chats).then((counts) => {
+        setUnreadCounts(counts as Record<string, number>);
+      }).catch(() => {});
+    }, [user, chats])
+  );
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    ensureGlobalChatExists().catch(() => {});
+    setTimeout(() => setRefreshing(false), 1500);
   }, []);
 
   const handleStartChat = async (targetUser: any) => {
@@ -90,25 +147,47 @@ export default function ChatsScreen() {
     }
   };
 
+  const handlePickGroupImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setGroupImage(result.assets[0].uri);
+    }
+  };
+
   const handleCreateGroup = async () => {
     if (!groupName.trim() || selectedMembers.length === 0 || !userProfile) return;
+    setCreatingGroup(true);
     try {
+      let imageUrl = '';
+      if (groupImage) {
+        imageUrl = await uploadToCloudinary(groupImage);
+      }
       const groupId = await createGroupChat({
         groupName: groupName.trim(),
         participants: selectedMembers,
-        creator: userProfile,
+        creator: { ...userProfile, photoURL: imageUrl || userProfile.photoURL },
       });
       setGroupModalVisible(false);
       setGroupName('');
       setSelectedMembers([]);
+      setGroupImage(null);
       router.push(`/chat/${groupId}`);
     } catch (e: any) {
       Alert.alert('Error', e.message);
+    } finally {
+      setCreatingGroup(false);
     }
   };
 
   const getChatDisplayName = (chat: any) => {
+    if (!chat) return 'Chat';
     if (chat.isGlobal) return 'Global Chat';
+    if (chat.id?.startsWith('zolbot__')) return 'Zolbot';
     if (chat.groupName) return chat.groupName;
     if (chat.participantMeta) {
       const other = Object.entries(chat.participantMeta).find(
@@ -120,6 +199,8 @@ export default function ChatsScreen() {
   };
 
   const getChatAvatar = (chat: any) => {
+    if (!chat) return null;
+    if (chat.id?.startsWith('zolbot__')) return null;
     if (chat.participantMeta) {
       const other = Object.entries(chat.participantMeta).find(
         ([key]) => key !== user?.uid && key !== 'zolbot'
@@ -157,7 +238,11 @@ export default function ChatsScreen() {
   });
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <View style={styles.headerSection}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
+      </View>
+
       <View style={styles.searchContainer}>
         <SearchBar
           value={searchQuery}
@@ -178,7 +263,21 @@ export default function ChatsScreen() {
             avatarUri={getChatAvatar(item)}
             isBot={item.id?.startsWith('zolbot__')}
             isGlobal={item.isGlobal}
+            isGroup={item.isGroup}
+            isOnline={(() => {
+              if (item.isGlobal || item.isGroup || item.id?.startsWith('zolbot__')) return false;
+              const otherUid = Object.keys(item.participantMeta || {}).find((k) => k !== user?.uid);
+              return otherUid ? onlineUsers[otherUid]?.online === true : false;
+            })()}
             onPress={() => router.push(`/chat/${item.id}`)}
+            onNamePress={() => setProfileSheetChat(item)}
+            onAvatarPress={() => {
+              if (item.isGlobal || item.isGroup || item.id?.startsWith('zolbot__')) {
+                setProfileSheetChat(item);
+              } else {
+                setProfileSheetChat(item);
+              }
+            }}
           />
         )}
         ListEmptyComponent={
@@ -229,13 +328,21 @@ export default function ChatsScreen() {
         </View>
       )}
 
+      {fabOpen && (
+        <TouchableOpacity
+          style={[styles.fabBackdrop, { backgroundColor: 'transparent' }]}
+          onPress={() => setFabOpen(false)}
+          activeOpacity={1}
+        />
+      )}
+
       {/* Search Users Modal */}
       <Modal visible={searchModalVisible} animationType="slide" transparent>
         <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Find Users</Text>
-              <TouchableOpacity onPress={() => { setSearchModalVisible(false); setSearchResults([]); }}>
+              <TouchableOpacity onPress={() => { setSearchModalVisible(false); setSearchResults([]); setUserSearch(''); }}>
                 <MaterialIcons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -280,27 +387,44 @@ export default function ChatsScreen() {
 
       {/* Create Group Modal */}
       <Modal visible={groupModalVisible} animationType="slide" transparent>
-        <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
+        <KeyboardAvoidingView
+          style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>New Group</Text>
-              <TouchableOpacity onPress={() => { setGroupModalVisible(false); setGroupName(''); setSelectedMembers([]); }}>
+              <TouchableOpacity onPress={() => { setGroupModalVisible(false); setGroupName(''); setSelectedMembers([]); setGroupImage(null); }}>
                 <MaterialIcons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
-            <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground }]}>
-              <MaterialIcons name="group" size={20} color={colors.textTertiary} />
-              <Text
-                style={[styles.groupNameInput, { color: colors.text }]}
-              >
-                {groupName || ''}
-              </Text>
-              {groupName.length === 0 && (
-                <Text style={[styles.groupNamePlaceholder, { color: colors.textTertiary }]}>
-                  Group name
-                </Text>
-              )}
+
+            <View style={styles.groupImageRow}>
+              <TouchableOpacity onPress={handlePickGroupImage} style={styles.groupImageBtn}>
+                {groupImage ? (
+                  <Image source={{ uri: groupImage }} style={styles.groupImagePreview} />
+                ) : (
+                  <View style={[styles.groupImagePlaceholder, { backgroundColor: colors.inputBackground }]}>
+                    <MaterialIcons name="camera-alt" size={24} color={colors.textTertiary} />
+                  </View>
+                )}
+              </TouchableOpacity>
+              <View style={[styles.inputContainer, { backgroundColor: colors.inputBackground, flex: 1 }]}>
+                <MaterialIcons name="group" size={20} color={colors.textTertiary} />
+                <TextInput
+                  style={[styles.groupNameInput, { color: colors.text }]}
+                  placeholder="Group name"
+                  placeholderTextColor={colors.textTertiary}
+                  value={groupName}
+                  onChangeText={setGroupName}
+                />
+              </View>
             </View>
+
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
+              Add members ({selectedMembers.length} selected)
+            </Text>
+
             <SearchBar
               value={userSearch}
               onChangeText={setUserSearch}
@@ -309,6 +433,7 @@ export default function ChatsScreen() {
             <FlatList
               data={searchResults}
               keyExtractor={(item) => item.uid}
+              style={styles.memberList}
               renderItem={({ item }) => {
                 const isSelected = selectedMembers.includes(item.uid);
                 return (
@@ -341,26 +466,71 @@ export default function ChatsScreen() {
             />
             {selectedMembers.length > 0 && (
               <TouchableOpacity
-                style={[styles.createGroupBtn, { backgroundColor: colors.primary }]}
+                style={[styles.createGroupBtn, { backgroundColor: colors.primary, opacity: creatingGroup ? 0.6 : 1 }]}
                 onPress={handleCreateGroup}
+                disabled={creatingGroup}
               >
                 <Text style={styles.createGroupBtnText}>
-                  Create Group ({selectedMembers.length} members)
+                  {creatingGroup ? 'Creating...' : `Create Group (${selectedMembers.length} members)`}
                 </Text>
               </TouchableOpacity>
             )}
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
-      {fabOpen && (
+      {/* Profile Sheet */}
+      <Modal visible={!!profileSheetChat} transparent animationType="slide">
         <TouchableOpacity
-          style={[styles.fabBackdrop, { backgroundColor: 'transparent' }]}
-          onPress={() => setFabOpen(false)}
+          style={styles.profileSheetOverlay}
           activeOpacity={1}
-        />
-      )}
-    </View>
+          onPress={() => setProfileSheetChat(null)}
+        >
+          <View style={[styles.profileSheet, { backgroundColor: colors.surface }]}>
+            <View style={[styles.profileSheetHandle, { backgroundColor: colors.textTertiary }]} />
+            <View style={styles.profileSheetContent}>
+              {profileSheetChat?.isGlobal ? (
+                <View style={[styles.profileSheetAvatar, { backgroundColor: colors.primary + '20' }]}>
+                  <MaterialIcons name="public" size={50} color={colors.primary} />
+                </View>
+              ) : profileSheetChat?.isGroup ? (
+                <View style={[styles.profileSheetAvatar, { backgroundColor: colors.primary + '20' }]}>
+                  <MaterialIcons name="group" size={50} color={colors.primary} />
+                </View>
+              ) : (
+                <Avatar uri={getChatAvatar(profileSheetChat)} size={90} isBot={profileSheetChat?.id?.startsWith('zolbot__')} />
+              )}
+              <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>
+                {getChatDisplayName(profileSheetChat)}
+              </Text>
+              <Text style={[styles.profileSubtitle, { color: colors.textSecondary }]}>
+                {profileSheetChat?.isGlobal
+                  ? 'Public chat for everyone'
+                  : profileSheetChat?.isGroup
+                  ? `${profileSheetChat.participants?.length || 0} members`
+                  : profileSheetChat?.id?.startsWith('zolbot__')
+                  ? 'AI Assistant'
+                  : (() => {
+                      const otherUid = Object.keys(profileSheetChat?.participantMeta || {}).find((k) => k !== user?.uid);
+                      const isOnline = otherUid ? onlineUsers[otherUid]?.online === true : false;
+                      return isOnline ? 'Online' : 'Offline';
+                    })()}
+              </Text>
+              {!profileSheetChat?.isGlobal && !profileSheetChat?.isGroup && !profileSheetChat?.id?.startsWith('zolbot__') && (() => {
+                const otherUid = Object.keys(profileSheetChat?.participantMeta || {}).find((k) => k !== user?.uid);
+                const isOnline = otherUid ? onlineUsers[otherUid]?.online === true : false;
+                return isOnline ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />
+                    <Text style={{ color: '#22C55E', fontSize: 13, fontWeight: '600' }}>Online</Text>
+                  </View>
+                ) : null;
+              })()}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
@@ -368,9 +538,19 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  headerSection: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+  },
   searchContainer: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingBottom: 8,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -400,6 +580,7 @@ const styles = StyleSheet.create({
     bottom: 90,
     right: 20,
     gap: 10,
+    zIndex: 10,
   },
   fabMenuItem: {
     flexDirection: 'row',
@@ -431,7 +612,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingTop: 16,
     paddingBottom: 32,
-    maxHeight: '80%',
+    maxHeight: '85%',
     paddingHorizontal: 16,
   },
   modalHeader: {
@@ -444,6 +625,38 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
+  groupImageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  groupImageBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    overflow: 'hidden',
+  },
+  groupImagePreview: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+  },
+  groupImagePlaceholder: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  memberList: {
+    maxHeight: 200,
+  },
   searchResult: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -452,9 +665,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   searchResultAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -480,17 +693,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     height: 48,
-    marginBottom: 12,
     gap: 8,
   },
   groupNameInput: {
     flex: 1,
     fontSize: 16,
-  },
-  groupNamePlaceholder: {
-    fontSize: 16,
-    position: 'absolute',
-    left: 42,
+    padding: 0,
   },
   createGroupBtn: {
     marginTop: 12,
@@ -503,5 +711,44 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  profileSheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  profileSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 34,
+  },
+  profileSheetHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 16,
+  },
+  profileSheetContent: {
+    alignItems: 'center',
+    paddingBottom: 10,
+  },
+  profileSheetAvatar: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileName: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 12,
+    paddingHorizontal: 20,
+  },
+  profileSubtitle: {
+    fontSize: 14,
+    marginTop: 4,
+    paddingHorizontal: 20,
   },
 });
