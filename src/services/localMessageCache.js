@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GLOBAL_CHAT_ID } from './chatService';
 
 const CACHE_PREFIX = 'zol_msgs_';
 const MAX_CACHE_MESSAGES = 500;
@@ -9,7 +8,6 @@ function cacheKey(chatId) {
 }
 
 export async function cacheMessages(chatId, messages) {
-  if (chatId === GLOBAL_CHAT_ID) return;
   try {
     const serializable = messages.map((m) => {
       let ts = m.createdAt;
@@ -40,7 +38,6 @@ export async function cacheMessages(chatId, messages) {
 }
 
 export async function getCachedMessages(chatId) {
-  if (chatId === GLOBAL_CHAT_ID) return [];
   try {
     const data = await AsyncStorage.getItem(cacheKey(chatId));
     return data ? JSON.parse(data) : [];

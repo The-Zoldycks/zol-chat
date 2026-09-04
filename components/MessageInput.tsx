@@ -63,7 +63,7 @@ export function MessageInput({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     paddingHorizontal: 8,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,

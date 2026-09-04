@@ -8,8 +8,11 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { AppState, type AppStateStatus } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, db } from '../services/firebase';
 import { setUserOnline, setUserOffline } from '../services/chatService';
+
+const PROFILE_CACHE_KEY = 'zol_user_profile';
 
 interface UserProfile {
   uid: string;
@@ -63,25 +66,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
-          setUserProfile(userDoc.data() as UserProfile);
-        } else {
-          const profile: UserProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            username: firebaseUser.email?.split('@')[0] || 'User',
-            usernameLower: (firebaseUser.email?.split('@')[0] || 'user').toLowerCase(),
-            photoURL: '',
-          };
-          await setDoc(doc(db, 'users', firebaseUser.uid), {
-            ...profile,
-            createdAt: serverTimestamp(),
-          });
-          setUserProfile(profile);
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const profile = userDoc.data() as UserProfile;
+            setUserProfile(profile);
+            AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+          } else {
+            const profile: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              username: firebaseUser.email?.split('@')[0] || 'User',
+              usernameLower: (firebaseUser.email?.split('@')[0] || 'user').toLowerCase(),
+              photoURL: '',
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), {
+              ...profile,
+              createdAt: serverTimestamp(),
+            });
+            setUserProfile(profile);
+            AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+          }
+        } catch {
+          const cached = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
+          if (cached) {
+            setUserProfile(JSON.parse(cached));
+          }
         }
       } else {
         setUserProfile(null);
+        AsyncStorage.removeItem(PROFILE_CACHE_KEY).catch(() => {});
       }
       setLoading(false);
     });

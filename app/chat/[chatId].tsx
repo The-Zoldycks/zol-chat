@@ -30,7 +30,6 @@ import {
   sendMessage,
   sendImageMessage,
   markChatAsRead,
-  markMessagesDelivered,
   setTyping,
   clearPresence,
   clearChatMessages,
@@ -39,6 +38,7 @@ import {
   toggleGroupAdmin,
   leaveGroup,
   subscribeToUsersPresence,
+  subscribeToChats,
   GLOBAL_CHAT_ID,
 } from '../../src/services/chatService';
 import { uploadToCloudinary } from '../../src/services/cloudinaryService';
@@ -68,9 +68,11 @@ export default function ChatScreen() {
   const [addMemberVisible, setAddMemberVisible] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
   const [memberSearchResults, setMemberSearchResults] = useState<any[]>([]);
+  const [allChats, setAllChats] = useState<any[]>([]);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [otherUserOnline, setOtherUserOnline] = useState(false);
   const [profileSheetUser, setProfileSheetUser] = useState<any>(null);
+  const [profileSheetUserOnline, setProfileSheetUserOnline] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const wasAtBottom = useRef<boolean>(true);
@@ -93,8 +95,9 @@ export default function ChatScreen() {
     const unsubMessages = subscribeToMessages(chatId, (msgs: any[]) => {
       setMessages(msgs);
       setPendingMessages((prev) => {
+        const before = prev.length;
         const realIds = new Set(msgs.map((m: any) => m.id));
-        return prev.filter((p) => {
+        const next = prev.filter((p) => {
           if (realIds.has(p.id)) return false;
           const isDuplicate = msgs.some(
             (m: any) =>
@@ -106,6 +109,10 @@ export default function ChatScreen() {
           );
           return !isDuplicate;
         });
+        if (before > 0 && next.length < before) {
+          wasAtBottom.current = true;
+        }
+        return next;
       });
     });
 
@@ -114,9 +121,6 @@ export default function ChatScreen() {
     });
 
     markChatAsRead(chatId, user.uid).catch(() => {});
-    if (!isGlobal) {
-      markMessagesDelivered(chatId, user.uid).catch(() => {});
-    }
 
     return () => {
       unsubMessages();
@@ -132,6 +136,14 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeToChats(user.uid, (chatList: any[]) => {
+      setAllChats(chatList);
+    });
+    return unsub;
+  }, [user]);
+
+  useEffect(() => {
     if (!chatData?.participantMeta || isGlobal || isGroup || isZolbot) return;
     const otherUid = Object.keys(chatData.participantMeta).find((k) => k !== user?.uid);
     if (!otherUid) return;
@@ -140,6 +152,17 @@ export default function ChatScreen() {
     });
     return unsub;
   }, [chatData, isGlobal, isGroup, isZolbot, user]);
+
+  useEffect(() => {
+    if (!profileSheetUser?.uid || profileSheetUser.uid === user?.uid || profileSheetUser.uid === 'zolbot') {
+      setProfileSheetUserOnline(false);
+      return;
+    }
+    const unsub = subscribeToUsersPresence([profileSheetUser.uid], (p: Record<string, any>) => {
+      setProfileSheetUserOnline(p[profileSheetUser.uid]?.online === true);
+    });
+    return unsub;
+  }, [profileSheetUser, user]);
 
   useEffect(() => {
     if (!memberSearch.trim()) {
@@ -170,6 +193,30 @@ export default function ChatScreen() {
     return other ? (other[1] as any) : null;
   };
 
+  const getRecentContacts = () => {
+    const existingParticipants = chatData?.participants || [];
+    const seen = new Set<string>(existingParticipants);
+    const contacts: any[] = [];
+    for (const chat of allChats) {
+      if (chat.isGlobal || chat.isGroup || chat.id?.startsWith('zolbot__')) continue;
+      if (!chat.participantMeta) continue;
+      const other = Object.entries(chat.participantMeta).find(
+        ([key]) => key !== user?.uid && key !== 'zolbot'
+      );
+      if (other && !seen.has(other[0])) {
+        seen.add(other[0]);
+        contacts.push({
+          uid: other[0],
+          username: (other[1] as any)?.username || 'User',
+          email: (other[1] as any)?.email || '',
+          photoURL: (other[1] as any)?.photoURL || null,
+        });
+      }
+      if (contacts.length >= 10) break;
+    }
+    return contacts;
+  };
+
   const getChatTitle = () => {
     if (isGlobal) return 'Global Chat';
     if (isZolbot) return 'Zolbot';
@@ -181,6 +228,7 @@ export default function ChatScreen() {
   const getChatAvatar = () => {
     if (isZolbot) return null;
     if (isGlobal) return null;
+    if (isGroup && chatData?.groupImage) return chatData.groupImage;
     const other = getOtherUser();
     return other?.photoURL || null;
   };
@@ -364,6 +412,8 @@ export default function ChatScreen() {
   };
 
   const allMessages = [...messages, ...pendingMessages].sort((a, b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return 1;
+    if (a.status !== 'pending' && b.status === 'pending') return -1;
     const aTime = a.createdAt?.toDate?.()?.getTime?.() || a.sentAt || 0;
     const bTime = b.createdAt?.toDate?.()?.getTime?.() || b.sentAt || 0;
     return aTime - bTime;
@@ -381,13 +431,18 @@ export default function ChatScreen() {
     const isPending = item.status === 'pending';
 
     const handleAvatarPress = () => {
-      if (!item.senderId || item.senderId === user?.uid) return;
+      if (!item.senderId) return;
+      if (item.senderId === user?.uid) {
+        setProfileSheetVisible(true);
+        setProfileSheetUser(null);
+        return;
+      }
       const meta = chatData?.participantMeta?.[item.senderId];
       if (meta) {
         setProfileSheetUser({ uid: item.senderId, ...meta });
         setProfileSheetVisible(true);
       } else if (item.senderId === 'zolbot') {
-        setProfileSheetUser({ uid: 'zolbot', username: 'Zolbot', isBot: true });
+        setProfileSheetUser({ uid: 'zolbot', username: 'Zolbot', isBot: true, email: 'zolbot@zoldyck.ai' });
         setProfileSheetVisible(true);
       }
     };
@@ -402,11 +457,9 @@ export default function ChatScreen() {
         isBot={isBotMsg}
         isPending={isPending}
         isGroup={isGroup || isGlobal}
-        messageStatus={item.status}
         imageUrl={item.imageUrl}
         onImagePress={(uri) => setImageViewerUri(uri)}
         onAvatarPress={handleAvatarPress}
-        senderUid={item.senderId}
       />
     );
   };
@@ -441,7 +494,7 @@ export default function ChatScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.surface }]} edges={['top']}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         {/* Header */}
@@ -533,6 +586,7 @@ export default function ChatScreen() {
             keyExtractor={(item) => item.id || Math.random().toString()}
             renderItem={renderMessage}
             contentContainerStyle={styles.messagesList}
+            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
             onScrollBeginDrag={() => { wasAtBottom.current = false; Keyboard.dismiss(); }}
             onScrollEndDrag={(e) => {
               const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
@@ -596,18 +650,20 @@ export default function ChatScreen() {
         />
 
         {/* Options Menu Modal */}
-        <Modal visible={menuVisible} transparent animationType="fade">
+        <Modal visible={menuVisible} transparent animationType="slide">
           <TouchableOpacity
-            style={[styles.menuOverlay, { backgroundColor: colors.overlay }]}
+            style={styles.profileSheetOverlay}
             activeOpacity={1}
             onPress={() => setMenuVisible(false)}
           >
-            <View style={[styles.menuDropdown, { backgroundColor: colors.surface }]}>
+            <View style={[styles.menuSheet, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+              <View style={[styles.profileSheetHandle, { backgroundColor: colors.text }]} />
+
               <TouchableOpacity
                 style={[styles.menuItem, { borderBottomColor: colors.border }]}
                 onPress={handleClearChat}
               >
-                <MaterialIcons name="delete-sweep" size={20} color={colors.danger} />
+                <MaterialIcons name="delete-sweep" size={22} color={colors.danger} />
                 <Text style={[styles.menuItemText, { color: colors.danger }]}>Clear Chat</Text>
               </TouchableOpacity>
               {isGroup && (
@@ -616,20 +672,20 @@ export default function ChatScreen() {
                     style={[styles.menuItem, { borderBottomColor: colors.border }]}
                     onPress={() => { setMenuVisible(false); setAddMemberVisible(true); }}
                   >
-                    <MaterialIcons name="person-add" size={20} color={colors.primary} />
+                    <MaterialIcons name="person-add" size={22} color={colors.primary} />
                     <Text style={[styles.menuItemText, { color: colors.text }]}>Add Members</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.menuItem, { borderBottomColor: colors.border }]}
                     onPress={handleLeaveGroup}
                   >
-                    <MaterialIcons name="exit-to-app" size={20} color={colors.danger} />
+                    <MaterialIcons name="exit-to-app" size={22} color={colors.danger} />
                     <Text style={[styles.menuItemText, { color: colors.danger }]}>Leave Group</Text>
                   </TouchableOpacity>
                 </>
               )}
               <TouchableOpacity style={styles.menuItem} onPress={handleDeleteChat}>
-                <MaterialIcons name="delete-forever" size={20} color={colors.danger} />
+                <MaterialIcons name="delete-forever" size={22} color={colors.danger} />
                 <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete Chat</Text>
               </TouchableOpacity>
             </View>
@@ -673,11 +729,11 @@ export default function ChatScreen() {
                   </View>
                 )}
 
-                {profileSheetUser && !getProfileSheetIsBot() && (
+                {profileSheetUser && !getProfileSheetIsBot() && profileSheetUser.uid !== user?.uid && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                    {otherUserOnline && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />}
-                    <Text style={{ color: otherUserOnline ? '#22C55E' : colors.textTertiary, fontSize: 13, fontWeight: '600' }}>
-                      {otherUserOnline ? 'Online' : 'Offline'}
+                    {profileSheetUserOnline && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />}
+                    <Text style={{ color: profileSheetUserOnline ? '#22C55E' : colors.textTertiary, fontSize: 13, fontWeight: '600' }}>
+                      {profileSheetUserOnline ? 'Online' : 'Offline'}
                     </Text>
                   </View>
                 )}
@@ -732,15 +788,19 @@ export default function ChatScreen() {
 
         {/* Add Members Modal */}
         <Modal visible={addMemberVisible} transparent animationType="slide">
-          <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
-            <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+          <TouchableOpacity
+            style={styles.profileSheetOverlay}
+            activeOpacity={1}
+            onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}
+          >
+            <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: colors.surface }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
                 <TouchableOpacity onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}>
                   <MaterialIcons name="close" size={24} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
-              <View style={[styles.searchInputContainer, { backgroundColor: colors.inputBackground, marginBottom: 12 }]}>
+              <View style={[styles.searchInputContainer, { backgroundColor: colors.inputBackground, marginBottom: 12, flex: undefined, height: 40 }]}>
                 <MaterialIcons name="search" size={16} color={colors.textTertiary} />
                 <TextInput
                   style={[styles.searchTextInput, { color: colors.text }]}
@@ -750,33 +810,50 @@ export default function ChatScreen() {
                   placeholderTextColor={colors.textTertiary}
                 />
               </View>
-              <FlatList
-                data={memberSearchResults}
-                keyExtractor={(item) => item.uid}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[styles.searchResult, { borderBottomColor: colors.border }]}
-                    onPress={() => handleAddMembers([item.uid])}
-                  >
-                    <Avatar uri={item.photoURL} size={40} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.searchResultName, { color: colors.text }]}>
-                        {item.username}
+              {(() => {
+                const recentContacts = getRecentContacts();
+                const data = memberSearch.length > 0 ? memberSearchResults : recentContacts;
+                return (
+                  <FlatList
+                    data={data}
+                    keyExtractor={(item) => item.uid}
+                    style={{ flex: 1 }}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={[styles.searchResult, { borderBottomColor: colors.border }]}
+                        onPress={() => handleAddMembers([item.uid])}
+                      >
+                        <Avatar uri={item.photoURL} size={40} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.searchResultName, { color: colors.text }]}>
+                            {item.username}
+                          </Text>
+                          {item.email ? (
+                            <Text style={{ fontSize: 13, color: colors.textTertiary }} numberOfLines={1}>
+                              {item.email}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <MaterialIcons name="add-circle" size={24} color={colors.primary} />
+                      </TouchableOpacity>
+                    )}
+                    ListHeaderComponent={
+                      memberSearch.length === 0 && recentContacts.length > 0 ? (
+                        <Text style={[styles.noResults, { color: colors.textTertiary, fontSize: 13, paddingTop: 12 }]}>
+                          Recent contacts
+                        </Text>
+                      ) : null
+                    }
+                    ListEmptyComponent={
+                      <Text style={[styles.noResults, { color: colors.textTertiary }]}>
+                        {memberSearch.length > 0 ? 'No users found' : 'No other contacts found. Try searching above.'}
                       </Text>
-                    </View>
-                    <MaterialIcons name="add-circle" size={24} color={colors.primary} />
-                  </TouchableOpacity>
-                )}
-                ListEmptyComponent={
-                  memberSearch.length > 0 ? (
-                    <Text style={[styles.noResults, { color: colors.textTertiary }]}>
-                      No users found
-                    </Text>
-                  ) : null
-                }
-              />
-            </View>
-          </View>
+                    }
+                  />
+                );
+              })()}
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
 
         {/* Image Viewer Modal */}
@@ -913,27 +990,20 @@ const styles = StyleSheet.create({
   },
   menuOverlay: {
     flex: 1,
-    justifyContent: 'flex-start',
-    alignItems: 'flex-end',
-    paddingTop: 60,
-    paddingRight: 12,
+    justifyContent: 'flex-end',
   },
-  menuDropdown: {
-    borderRadius: 12,
-    minWidth: 200,
-    overflow: 'hidden',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
+  menuSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    paddingBottom: 32,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   menuItemText: {
@@ -1029,11 +1099,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
+    flex: 1,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 16,
     paddingBottom: 32,
-    maxHeight: '70%',
     paddingHorizontal: 16,
   },
   modalHeader: {

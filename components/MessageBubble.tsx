@@ -11,11 +11,9 @@ interface MessageBubbleProps {
   isBot?: boolean;
   isPending?: boolean;
   isGroup?: boolean;
-  messageStatus?: string;
   imageUrl?: string;
   onImagePress?: (uri: string) => void;
   onAvatarPress?: () => void;
-  senderUid?: string;
 }
 
 export function MessageBubble({
@@ -27,24 +25,11 @@ export function MessageBubble({
   isBot,
   isPending,
   isGroup,
-  messageStatus,
   imageUrl,
   onImagePress,
   onAvatarPress,
-  senderUid,
 }: MessageBubbleProps) {
   const colors = useThemeColors();
-
-  const statusIcon = () => {
-    if (!isOwn) return null;
-    if (isPending) return null;
-    if (messageStatus === 'read') return '✓✓';
-    if (messageStatus === 'delivered') return '✓✓';
-    if (messageStatus === 'sent') return '✓';
-    return null;
-  };
-
-  const statusColor = messageStatus === 'read' ? colors.primary : messageStatus === 'delivered' ? colors.primary : colors.textTertiary;
 
   return (
     <View style={[styles.container, { opacity: isPending ? 0.4 : 1 }]}>
@@ -73,18 +58,11 @@ export function MessageBubble({
           <Text style={[styles.messageText, { color: colors.text }]}>{text}</Text>
         ) : null}
 
-        {(timestamp || isOwn) && (
-          <View style={styles.timestampRow}>
-            <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
-              {timestamp}
-            </Text>
-            {isOwn && !isPending && statusIcon() && (
-              <Text style={[styles.status, { color: statusColor }]}>
-                {statusIcon()}
-              </Text>
-            )}
-          </View>
-        )}
+        {timestamp ? (
+          <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
+            {timestamp}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -118,17 +96,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 4,
   },
-  timestampRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
   timestamp: {
     fontSize: 11,
-  },
-  status: {
-    fontSize: 11,
-    fontWeight: '600',
+    marginTop: 2,
   },
 });

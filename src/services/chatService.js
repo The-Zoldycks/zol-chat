@@ -18,6 +18,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { cacheMessages, getCachedMessages, clearCachedMessages } from './localMessageCache';
+import { cacheChats, getCachedChats } from './localChatsCache';
 
 const chatsCollection = collection(db, 'chats');
 
@@ -208,7 +209,7 @@ export async function startOrOpenChat(currentUser, targetUser) {
   return chatId;
 }
 
-export async function createGroupChat({ groupName, participants, creator }) {
+export async function createGroupChat({ groupName, participants, creator, groupImage }) {
   const trimmedName = groupName.trim();
   if (!trimmedName) throw new Error('Group name cannot be empty');
 
@@ -254,6 +255,7 @@ export async function createGroupChat({ groupName, participants, creator }) {
     id: groupId,
     isGroup: true,
     groupName: trimmedName,
+    groupImage: groupImage || '',
     groupAdmins: [creatorUid],
     participants: allParticipants,
     participantMeta,
@@ -368,22 +370,31 @@ export async function leaveGroup(chatId, uid) {
 }
 
 export function subscribeToChats(uid, onData) {
+  let snapshotReceived = false;
+
+  getCachedChats().then((cached) => {
+    if (!snapshotReceived && cached.length > 0) onData(cached);
+  });
+
   const chatQuery = query(chatsCollection, where('participants', 'array-contains', uid), orderBy('updatedAt', 'desc'));
   return onSnapshot(chatQuery, (snapshot) => {
-    onData(snapshot.docs.map((chatDoc) => chatDoc.data()));
+    snapshotReceived = true;
+    const chats = snapshot.docs.map((chatDoc) => ({ id: chatDoc.id, ...chatDoc.data() }));
+    onData(chats);
+    cacheChats(chats).catch(() => {});
   }, () => {
-    onData([]);
+    if (!snapshotReceived) {
+      getCachedChats().then((cached) => onData(cached));
+    }
   });
 }
 
 export function subscribeToMessages(chatId, onData) {
   let snapshotReceived = false;
 
-  if (chatId !== GLOBAL_CHAT_ID) {
-    getCachedMessages(chatId).then((cached) => {
-      if (!snapshotReceived && cached.length > 0) onData(cached);
-    });
-  }
+  getCachedMessages(chatId).then((cached) => {
+    if (!snapshotReceived && cached.length > 0) onData(cached);
+  });
 
   const messageQuery = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'));
   return onSnapshot(messageQuery, (snapshot) => {
@@ -396,68 +407,23 @@ export function subscribeToMessages(chatId, onData) {
         return !ts || ts >= cutoff;
       });
       purgeOldGlobalMessages().catch(() => {});
-    } else {
-      cacheMessages(chatId, docs);
     }
+    cacheMessages(chatId, docs).catch(() => {});
     onData(docs);
   }, () => {
-    onData([]);
+    if (!snapshotReceived) {
+      getCachedMessages(chatId).then((cached) => onData(cached));
+    }
   });
 }
 
 export async function markChatAsRead(chatId, uid) {
-  const chatRef = doc(db, 'chats', chatId);
   try {
-    const chatSnap = await getDoc(chatRef);
-    if (!chatSnap.exists()) return;
-    const chatData = chatSnap.data();
-    const lastRead = chatData.participantMeta?.[uid]?.lastRead;
-
-    await updateDoc(chatRef, {
+    await updateDoc(doc(db, 'chats', chatId), {
       [`participantMeta.${uid}.lastRead`]: serverTimestamp(),
     });
-
-    const msgsRef = collection(db, 'chats', chatId, 'messages');
-    let msgQuery;
-    if (lastRead) {
-      const lastReadDate = lastRead?.toDate ? lastRead.toDate() : new Date(lastRead);
-      msgQuery = query(msgsRef, orderBy('createdAt', 'desc'), limit(50));
-    } else {
-      msgQuery = query(msgsRef, orderBy('createdAt', 'desc'), limit(50));
-    }
-
-    const snap = await getDocs(msgQuery);
-    const batch = writeBatch(db);
-    let count = 0;
-    snap.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data.senderId !== uid && data.status !== 'read' && count < 30) {
-        batch.update(doc(db, 'chats', chatId, 'messages', docSnap.id), { status: 'read' });
-        count++;
-      }
-    });
-    if (count > 0) await batch.commit();
   } catch {
     // Chat may not exist yet
-  }
-}
-
-export async function markMessagesDelivered(chatId, uid) {
-  try {
-    const msgsRef = collection(db, 'chats', chatId, 'messages');
-    const snap = await getDocs(query(msgsRef, orderBy('createdAt', 'desc'), limit(30)));
-    const batch = writeBatch(db);
-    let count = 0;
-    snap.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data.senderId !== uid && data.status === 'sent' && count < 20) {
-        batch.update(doc(db, 'chats', chatId, 'messages', docSnap.id), { status: 'delivered' });
-        count++;
-      }
-    });
-    if (count > 0) await batch.commit();
-  } catch {
-    // Best-effort
   }
 }
 

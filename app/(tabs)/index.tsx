@@ -64,7 +64,8 @@ export default function ChatsScreen() {
     let globalChatData: any = null;
 
     const unsubChats = subscribeToChats(user.uid, async (chatList: any[]) => {
-      const allChats = globalChatData ? [globalChatData, ...chatList] : chatList;
+      const filtered = chatList.filter((c: any) => c.id !== GLOBAL_CHAT_ID);
+      const allChats = globalChatData ? [globalChatData, ...filtered] : filtered;
       setChats(allChats);
       const counts = await getUnreadCounts(user.uid, allChats);
       setUnreadCounts(counts as Record<string, number>);
@@ -170,7 +171,8 @@ export default function ChatsScreen() {
       const groupId = await createGroupChat({
         groupName: groupName.trim(),
         participants: selectedMembers,
-        creator: { ...userProfile, photoURL: imageUrl || userProfile.photoURL },
+        creator: userProfile,
+        groupImage: imageUrl,
       });
       setGroupModalVisible(false);
       setGroupName('');
@@ -201,6 +203,7 @@ export default function ChatsScreen() {
   const getChatAvatar = (chat: any) => {
     if (!chat) return null;
     if (chat.id?.startsWith('zolbot__')) return null;
+    if (chat.isGroup && chat.groupImage) return chat.groupImage;
     if (chat.participantMeta) {
       const other = Object.entries(chat.participantMeta).find(
         ([key]) => key !== user?.uid && key !== 'zolbot'
@@ -208,6 +211,29 @@ export default function ChatsScreen() {
       if (other) return (other[1] as any)?.photoURL || null;
     }
     return null;
+  };
+
+  const getRecentContacts = () => {
+    const seen = new Set<string>();
+    const contacts: any[] = [];
+    for (const chat of chats) {
+      if (chat.isGlobal || chat.isGroup || chat.id?.startsWith('zolbot__')) continue;
+      if (!chat.participantMeta) continue;
+      const other = Object.entries(chat.participantMeta).find(
+        ([key]) => key !== user?.uid && key !== 'zolbot'
+      );
+      if (other && !seen.has(other[0])) {
+        seen.add(other[0]);
+        contacts.push({
+          uid: other[0],
+          username: (other[1] as any)?.username || 'User',
+          email: (other[1] as any)?.email || '',
+          photoURL: (other[1] as any)?.photoURL || null,
+        });
+      }
+      if (contacts.length >= 10) break;
+    }
+    return contacts;
   };
 
   const formatTimestamp = (updatedAt: any) => {
@@ -264,6 +290,7 @@ export default function ChatsScreen() {
             isBot={item.id?.startsWith('zolbot__')}
             isGlobal={item.isGlobal}
             isGroup={item.isGroup}
+            groupImage={item.groupImage}
             isOnline={(() => {
               if (item.isGlobal || item.isGroup || item.id?.startsWith('zolbot__')) return false;
               const otherUid = Object.keys(item.participantMeta || {}).find((k) => k !== user?.uid);
@@ -352,7 +379,7 @@ export default function ChatsScreen() {
               placeholder="Search by username or email..."
             />
             <FlatList
-              data={searchResults}
+              data={userSearch.length > 0 ? searchResults : getRecentContacts()}
               keyExtractor={(item) => item.uid}
               renderItem={({ item }) => (
                 <TouchableOpacity
@@ -360,7 +387,11 @@ export default function ChatsScreen() {
                   onPress={() => handleStartChat(item)}
                 >
                   <View style={[styles.searchResultAvatar, { backgroundColor: colors.inputBackground }]}>
-                    <MaterialIcons name="person" size={24} color={colors.textTertiary} />
+                    {item.photoURL ? (
+                      <Avatar uri={item.photoURL} size={40} />
+                    ) : (
+                      <MaterialIcons name="person" size={24} color={colors.textTertiary} />
+                    )}
                   </View>
                   <View style={styles.searchResultInfo}>
                     <Text style={[styles.searchResultName, { color: colors.text }]}>
@@ -373,6 +404,13 @@ export default function ChatsScreen() {
                   <MaterialIcons name="chat" size={20} color={colors.primary} />
                 </TouchableOpacity>
               )}
+              ListHeaderComponent={
+                userSearch.length === 0 && getRecentContacts().length > 0 ? (
+                  <Text style={[styles.noResults, { color: colors.textTertiary, fontSize: 13, paddingTop: 12 }]}>
+                    Recent contacts
+                  </Text>
+                ) : null
+              }
               ListEmptyComponent={
                 userSearch.length > 0 ? (
                   <Text style={[styles.noResults, { color: colors.textTertiary }]}>
@@ -431,7 +469,7 @@ export default function ChatsScreen() {
               placeholder="Search users to add..."
             />
             <FlatList
-              data={searchResults}
+              data={userSearch.length > 0 ? searchResults : getRecentContacts()}
               keyExtractor={(item) => item.uid}
               style={styles.memberList}
               renderItem={({ item }) => {
@@ -448,7 +486,11 @@ export default function ChatsScreen() {
                     }}
                   >
                     <View style={[styles.searchResultAvatar, { backgroundColor: colors.inputBackground }]}>
-                      <MaterialIcons name="person" size={24} color={colors.textTertiary} />
+                      {item.photoURL ? (
+                        <Avatar uri={item.photoURL} size={40} />
+                      ) : (
+                        <MaterialIcons name="person" size={24} color={colors.textTertiary} />
+                      )}
                     </View>
                     <View style={styles.searchResultInfo}>
                       <Text style={[styles.searchResultName, { color: colors.text }]}>
@@ -463,6 +505,20 @@ export default function ChatsScreen() {
                   </TouchableOpacity>
                 );
               }}
+              ListHeaderComponent={
+                userSearch.length === 0 && getRecentContacts().length > 0 ? (
+                  <Text style={[styles.noResults, { color: colors.textTertiary, fontSize: 13, paddingTop: 12 }]}>
+                    Recent contacts
+                  </Text>
+                ) : null
+              }
+              ListEmptyComponent={
+                userSearch.length > 0 ? (
+                  <Text style={[styles.noResults, { color: colors.textTertiary }]}>
+                    No users found
+                  </Text>
+                ) : null
+              }
             />
             {selectedMembers.length > 0 && (
               <TouchableOpacity
@@ -493,6 +549,8 @@ export default function ChatsScreen() {
                 <View style={[styles.profileSheetAvatar, { backgroundColor: colors.primary + '20' }]}>
                   <MaterialIcons name="public" size={50} color={colors.primary} />
                 </View>
+              ) : profileSheetChat?.isGroup && profileSheetChat?.groupImage ? (
+                <Avatar uri={profileSheetChat.groupImage} size={90} />
               ) : profileSheetChat?.isGroup ? (
                 <View style={[styles.profileSheetAvatar, { backgroundColor: colors.primary + '20' }]}>
                   <MaterialIcons name="group" size={50} color={colors.primary} />

@@ -13,6 +13,7 @@ interface ChatListItemProps {
   isGlobal?: boolean;
   isGroup?: boolean;
   isOnline?: boolean;
+  groupImage?: string;
   onPress: () => void;
   onNamePress?: () => void;
   onAvatarPress?: () => void;
@@ -28,6 +29,7 @@ export function ChatListItem({
   isGlobal,
   isGroup,
   isOnline,
+  groupImage,
   onPress,
   onNamePress,
   onAvatarPress,
@@ -49,6 +51,8 @@ export function ChatListItem({
           <View style={[styles.globalAvatar, { backgroundColor: colors.primary + '20' }]}>
             <MaterialIcons name="public" size={28} color={colors.primary} />
           </View>
+        ) : isGroup && groupImage ? (
+          <Avatar uri={groupImage} size={52} />
         ) : isGroup ? (
           <View style={[styles.globalAvatar, { backgroundColor: colors.primary + '20' }]}>
             <MaterialIcons name="group" size={28} color={colors.primary} />
