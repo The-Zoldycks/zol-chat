@@ -793,7 +793,8 @@ export default function ChatScreen() {
             activeOpacity={1}
             onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}
           >
-            <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <SafeAreaView edges={['top']} style={{ flex: 1, justifyContent: 'flex-end' }}>
+              <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: colors.surface }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
                 <TouchableOpacity onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}>
@@ -853,6 +854,7 @@ export default function ChatScreen() {
                 );
               })()}
             </TouchableOpacity>
+            </SafeAreaView>
           </TouchableOpacity>
         </Modal>
 
