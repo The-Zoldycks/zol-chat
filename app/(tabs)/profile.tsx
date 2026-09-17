@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { useThemeContext } from '../../src/contexts/ThemeContext';
 import { Avatar } from '../../components/Avatar';
 import { uploadToCloudinary } from '../../src/services/cloudinaryService';
 import { clearAllMessageCaches } from '../../src/services/localMessageCache';
+import { confirm } from '../../src/utils/confirm';
 
 export default function ProfileScreen() {
   const { userProfile, updateProfile, signOut } = useAuth();
@@ -28,6 +29,12 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [username, setUsername] = useState(userProfile?.username || '');
   const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (userProfile?.username && !editing) {
+      setUsername(userProfile.username);
+    }
+  }, [userProfile?.username, editing]);
 
   const handleSaveUsername = async () => {
     if (!username.trim()) {
@@ -64,17 +71,10 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = async () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: async () => {
-          await clearAllMessageCaches();
-          await signOut();
-        },
-      },
-    ]);
+    confirm('Logout', 'Are you sure you want to logout?', async () => {
+      await clearAllMessageCaches();
+      await signOut();
+    }, { confirmText: 'Logout', destructive: true });
   };
 
   const themeOptions = [

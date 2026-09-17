@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { db } from '../../src/services/firebase';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -42,6 +42,7 @@ import {
   GLOBAL_CHAT_ID,
 } from '../../src/services/chatService';
 import { uploadToCloudinary } from '../../src/services/cloudinaryService';
+import { confirm } from '../../src/utils/confirm';
 import * as ImagePicker from 'expo-image-picker';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -248,18 +249,26 @@ export default function ChatScreen() {
   };
 
   const handleSend = async () => {
-    if (!text.trim() || !userProfile || !chatId) return;
+    if (!text.trim() || !user || !chatId) return;
     const msgText = text.trim();
     setText('');
     setShowMentions(false);
+
+    const activeProfile = userProfile || {
+      uid: user.uid,
+      email: user.email || '',
+      username: user.displayName || user.email?.split('@')[0] || 'User',
+      usernameLower: (user.displayName || user.email?.split('@')[0] || 'user').toLowerCase(),
+      photoURL: user.photoURL || '',
+    };
 
     const tempId = `pending_${Date.now()}_${Math.random()}`;
     const pendingMsg = {
       id: tempId,
       text: msgText,
-      senderId: user?.uid,
-      senderUsername: userProfile.username,
-      senderPhotoURL: userProfile.photoURL,
+      senderId: user.uid,
+      senderUsername: activeProfile.username,
+      senderPhotoURL: activeProfile.photoURL,
       status: 'pending',
       createdAt: null,
       sentAt: Date.now(),
@@ -269,7 +278,7 @@ export default function ChatScreen() {
 
     setSending(true);
     try {
-      await sendMessage(chatId, userProfile, msgText);
+      await sendMessage(chatId, activeProfile, msgText);
     } catch (e: any) {
       setPendingMessages((prev) => prev.filter((p) => p.id !== tempId));
       Alert.alert('Error', 'Failed to send message');
@@ -347,33 +356,19 @@ export default function ChatScreen() {
 
   const handleClearChat = async () => {
     if (!chatId) return;
-    Alert.alert('Clear Chat', 'Delete all messages in this chat?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear',
-        style: 'destructive',
-        onPress: async () => {
-          await clearChatMessages(chatId);
-          setMenuVisible(false);
-        },
-      },
-    ]);
+    confirm('Clear Chat', 'Delete all messages in this chat?', async () => {
+      await clearChatMessages(chatId);
+      setMenuVisible(false);
+    }, { confirmText: 'Clear', destructive: true });
   };
 
   const handleDeleteChat = async () => {
     if (!chatId) return;
-    Alert.alert('Delete Chat', 'This will permanently delete this chat and all messages.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteChat(chatId);
-          setMenuVisible(false);
-          router.back();
-        },
-      },
-    ]);
+    confirm('Delete Chat', 'This will permanently delete this chat and all messages.', async () => {
+      await deleteChat(chatId);
+      setMenuVisible(false);
+      router.back();
+    }, { confirmText: 'Delete', destructive: true });
   };
 
   const handleAddMembers = async (newMembers: string[]) => {
@@ -389,17 +384,10 @@ export default function ChatScreen() {
 
   const handleLeaveGroup = async () => {
     if (!chatId || !user) return;
-    Alert.alert('Leave Group', 'Are you sure you want to leave this group?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Leave',
-        style: 'destructive',
-        onPress: async () => {
-          await leaveGroup(chatId, user.uid);
-          router.back();
-        },
-      },
-    ]);
+    confirm('Leave Group', 'Are you sure you want to leave this group?', async () => {
+      await leaveGroup(chatId, user.uid);
+      router.back();
+    }, { confirmText: 'Leave', destructive: true });
   };
 
   const formatTime = (createdAt: any) => {
@@ -411,11 +399,20 @@ export default function ChatScreen() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const getMsgTime = (m: any) => {
+    if (m.createdAt?.toDate) return m.createdAt.toDate().getTime();
+    if (m.createdAt?.seconds) return m.createdAt.seconds * 1000;
+    if (m.createdAt instanceof Date) return m.createdAt.getTime();
+    if (typeof m.createdAt === 'number') return m.createdAt;
+    if (m.sentAt) return m.sentAt;
+    return Date.now();
+  };
+
   const allMessages = [...messages, ...pendingMessages].sort((a, b) => {
     if (a.status === 'pending' && b.status !== 'pending') return 1;
     if (a.status !== 'pending' && b.status === 'pending') return -1;
-    const aTime = a.createdAt?.toDate?.()?.getTime?.() || a.sentAt || 0;
-    const bTime = b.createdAt?.toDate?.()?.getTime?.() || b.sentAt || 0;
+    const aTime = getMsgTime(a);
+    const bTime = getMsgTime(b);
     return aTime - bTime;
   });
 
@@ -430,21 +427,49 @@ export default function ChatScreen() {
     const isBotMsg = item.senderId === 'zolbot';
     const isPending = item.status === 'pending';
 
-    const handleAvatarPress = () => {
+    const handleAvatarPress = async () => {
       if (!item.senderId) return;
       if (item.senderId === user?.uid) {
         setProfileSheetVisible(true);
         setProfileSheetUser(null);
         return;
       }
+      if (item.senderId === 'zolbot') {
+        setProfileSheetUser({ uid: 'zolbot', username: 'Zolbot', isBot: true, email: 'zolbot@zoldyck.ai' });
+        setProfileSheetVisible(true);
+        return;
+      }
+
       const meta = chatData?.participantMeta?.[item.senderId];
       if (meta) {
         setProfileSheetUser({ uid: item.senderId, ...meta });
         setProfileSheetVisible(true);
-      } else if (item.senderId === 'zolbot') {
-        setProfileSheetUser({ uid: 'zolbot', username: 'Zolbot', isBot: true, email: 'zolbot@zoldyck.ai' });
-        setProfileSheetVisible(true);
+        return;
       }
+
+      // In global chats or groups where sender is not in participantMeta,
+      // immediately display info from the message item and fetch the user doc in background
+      const fallbackUser = {
+        uid: item.senderId,
+        username: item.senderUsername || 'User',
+        email: item.senderEmail || '',
+        photoURL: item.senderPhotoURL || null,
+      };
+      setProfileSheetUser(fallbackUser);
+      setProfileSheetVisible(true);
+
+      try {
+        const uSnap = await getDoc(doc(db, 'users', item.senderId));
+        if (uSnap.exists()) {
+          const uData = uSnap.data();
+          setProfileSheetUser({
+            uid: item.senderId,
+            username: uData.username || item.senderUsername || 'User',
+            email: uData.email || item.senderEmail || '',
+            photoURL: uData.photoURL || item.senderPhotoURL || null,
+          });
+        }
+      } catch {}
     };
 
     return (
@@ -738,7 +763,7 @@ export default function ChatScreen() {
                   </View>
                 )}
 
-                {isGlobal && (
+                {!profileSheetUser && isGlobal && (
                   <View style={[styles.profileInfoRow, { backgroundColor: colors.inputBackground }]}>
                     <MaterialIcons name="public" size={20} color={colors.primary} />
                     <Text style={[styles.profileInfoText, { color: colors.text }]}>
@@ -747,15 +772,30 @@ export default function ChatScreen() {
                   </View>
                 )}
 
-                {isGroup && chatData?.participants && (
+                {!profileSheetUser && isGroup && chatData?.participants && (
                   <View style={styles.profileMembersSection}>
                     <Text style={[styles.profileMembersTitle, { color: colors.textSecondary }]}>
                       Members
                     </Text>
                     {getParticipants().map((member) => (
-                      <View
+                      <TouchableOpacity
                         key={member.uid}
                         style={[styles.profileMemberRow, { borderBottomColor: colors.border }]}
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          if (member.uid === user?.uid) {
+                            setProfileSheetUser(null);
+                          } else if (member.uid === 'zolbot') {
+                            setProfileSheetUser({ uid: 'zolbot', username: 'Zolbot', isBot: true, email: 'zolbot@zoldyck.ai' });
+                          } else {
+                            setProfileSheetUser({
+                              uid: member.uid,
+                              username: member.username,
+                              email: member.email,
+                              photoURL: member.photoURL,
+                            });
+                          }
+                        }}
                       >
                         <Avatar uri={member.photoURL} size={36} isBot={member.isBot} />
                         <View style={styles.profileMemberInfo}>
@@ -768,18 +808,52 @@ export default function ChatScreen() {
                             </Text>
                           )}
                         </View>
-                      </View>
+                        <MaterialIcons name="chevron-right" size={20} color={colors.textTertiary} />
+                      </TouchableOpacity>
                     ))}
                   </View>
                 )}
 
-                {!profileSheetUser && !isGlobal && !isGroup && !isZolbot && (
+                {/* Email row for individual user (when clicking an avatar/user in group, global, or 1v1) */}
+                {(profileSheetUser?.email || (!profileSheetUser && !isGlobal && !isGroup && !isZolbot && getOtherUser()?.email)) ? (
                   <View style={[styles.profileInfoRow, { backgroundColor: colors.inputBackground }]}>
                     <MaterialIcons name="email" size={20} color={colors.textTertiary} />
                     <Text style={[styles.profileInfoText, { color: colors.text }]}>
-                      {getOtherUser()?.email}
+                      {profileSheetUser?.email || getOtherUser()?.email}
                     </Text>
                   </View>
+                ) : null}
+
+                {/* Direct message button if viewing another user from group or global */}
+                {profileSheetUser && profileSheetUser.uid !== user?.uid && !profileSheetUser.isBot && (isGroup || isGlobal) && (
+                  <TouchableOpacity
+                    style={[styles.startChatButton, { backgroundColor: colors.primary }]}
+                    onPress={async () => {
+                      setProfileSheetVisible(false);
+                      try {
+                        const { startOrOpenChat } = await import('../../src/services/chatService');
+                        const targetUser = {
+                          uid: profileSheetUser.uid,
+                          username: profileSheetUser.username,
+                          email: profileSheetUser.email,
+                          photoURL: profileSheetUser.photoURL,
+                        };
+                        const activeProfile = userProfile || {
+                          uid: user?.uid || '',
+                          email: user?.email || '',
+                          username: user?.displayName || user?.email?.split('@')[0] || 'User',
+                          photoURL: user?.photoURL || '',
+                        };
+                        const directChatId = await startOrOpenChat(activeProfile, targetUser);
+                        router.push(`/chat/${directChatId}`);
+                      } catch (err: any) {
+                        Alert.alert('Error', err.message || 'Could not open chat');
+                      }
+                    }}
+                  >
+                    <MaterialIcons name="chat" size={18} color="#FFF" />
+                    <Text style={styles.startChatButtonText}>Message {profileSheetUser.username}</Text>
+                  </TouchableOpacity>
                 )}
               </View>
             </View>
@@ -1065,6 +1139,21 @@ const styles = StyleSheet.create({
   profileInfoText: {
     fontSize: 14,
     flex: 1,
+  },
+  startChatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  startChatButtonText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 15,
   },
   profileMembersSection: {
     width: '100%',

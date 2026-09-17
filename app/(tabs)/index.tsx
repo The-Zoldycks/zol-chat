@@ -132,7 +132,15 @@ export default function ChatsScreen() {
   const handleStartChat = async (targetUser: any) => {
     setSearchModalVisible(false);
     setUserSearch('');
-    if (!userProfile) return;
+    if (!user) return;
+
+    const activeProfile = userProfile || {
+      uid: user.uid,
+      email: user.email || '',
+      username: user.displayName || user.email?.split('@')[0] || 'User',
+      usernameLower: (user.displayName || user.email?.split('@')[0] || 'user').toLowerCase(),
+      photoURL: user.photoURL || '',
+    };
 
     if (targetUser.uid === 'zolbot') {
       const chatId = `zolbot__${user?.uid}`;
@@ -141,7 +149,7 @@ export default function ChatsScreen() {
     }
 
     try {
-      const chatId = await startOrOpenChat(userProfile, targetUser);
+      const chatId = await startOrOpenChat(activeProfile, targetUser);
       router.push(`/chat/${chatId}`);
     } catch (e: any) {
       Alert.alert('Error', e.message);

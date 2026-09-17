@@ -1,0 +1,5 @@
+input:focus,
+textarea:focus,
+[contenteditable="true"]:focus {
+  outline: none !important;
+}

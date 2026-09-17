@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
+  updateProfile as firebaseUpdateProfile,
   type User,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -13,6 +14,7 @@ import { auth, db } from '../services/firebase';
 import { setUserOnline, setUserOffline } from '../services/chatService';
 
 const PROFILE_CACHE_KEY = 'zol_user_profile';
+const CHATS_CACHE_KEY = 'zol_chats_cache';
 
 interface UserProfile {
   uid: string;
@@ -33,6 +35,23 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function profileFromFirebaseUser(firebaseUser: User): UserProfile {
+  const username = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+  return {
+    uid: firebaseUser.uid,
+    email: firebaseUser.email || '',
+    username,
+    usernameLower: username.toLowerCase(),
+    photoURL: firebaseUser.photoURL || '',
+  };
+}
+
+function getEffectiveProfile(userProfile: UserProfile | null, user: User | null): UserProfile {
+  if (userProfile) return userProfile;
+  if (user) return profileFromFirebaseUser(user);
+  return { uid: '', email: '', username: 'User', usernameLower: 'user', photoURL: '' };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -62,40 +81,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
+  // Preload cached profile immediately on mount so UI has profile instantly
+  useEffect(() => {
+    AsyncStorage.getItem(PROFILE_CACHE_KEY).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.uid && parsed.username) {
+            setUserProfile((curr) => curr || parsed);
+          }
+        } catch {}
+      }
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
+        // Set immediate fallback from Firebase user
+        const fallbackProfile = profileFromFirebaseUser(firebaseUser);
+        setUserProfile(fallbackProfile);
+
+        // Try getting cached profile first to avoid flickering
+        try {
+          const cached = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.uid === firebaseUser.uid && parsed.username) {
+              setUserProfile(parsed);
+            }
+          }
+        } catch {}
+
+        // Fetch fresh profile from Firestore
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             const profile = userDoc.data() as UserProfile;
-            setUserProfile(profile);
-            AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+            if (profile && profile.username) {
+              setUserProfile(profile);
+              await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+            } else {
+              // Firestore doc exists but missing username - write the fallback
+              const fixedProfile = { ...fallbackProfile };
+              await setDoc(doc(db, 'users', firebaseUser.uid), {
+                ...fixedProfile,
+                createdAt: serverTimestamp(),
+              }, { merge: true });
+              setUserProfile(fixedProfile);
+              await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fixedProfile)).catch(() => {});
+            }
           } else {
-            const profile: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              username: firebaseUser.email?.split('@')[0] || 'User',
-              usernameLower: (firebaseUser.email?.split('@')[0] || 'user').toLowerCase(),
-              photoURL: '',
-            };
+            // No Firestore doc - create one
             await setDoc(doc(db, 'users', firebaseUser.uid), {
-              ...profile,
+              ...fallbackProfile,
               createdAt: serverTimestamp(),
             });
-            setUserProfile(profile);
-            AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+            setUserProfile(fallbackProfile);
+            await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fallbackProfile)).catch(() => {});
           }
         } catch {
-          const cached = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
-          if (cached) {
-            setUserProfile(JSON.parse(cached));
-          }
+          // If Firestore is offline or fails, keep whatever profile we have
+          setUserProfile((current) => {
+            if (current && current.uid === firebaseUser.uid && current.username && current.username !== 'User') return current;
+            return fallbackProfile;
+          });
         }
       } else {
         setUserProfile(null);
-        AsyncStorage.removeItem(PROFILE_CACHE_KEY).catch(() => {});
+        await AsyncStorage.removeItem(PROFILE_CACHE_KEY).catch(() => {});
       }
       setLoading(false);
     });
@@ -115,11 +170,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       usernameLower: username.toLowerCase(),
       photoURL: '',
     };
+    // Set displayName on Firebase Auth user so fallbacks work
+    try {
+      await firebaseUpdateProfile(cred.user, { displayName: username });
+    } catch {}
     await setDoc(doc(db, 'users', cred.user.uid), {
       ...profile,
       createdAt: serverTimestamp(),
     });
     setUserProfile(profile);
+    await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
   };
 
   const signOut = async () => {
@@ -127,20 +187,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await firebaseSignOut(auth);
     setUser(null);
     setUserProfile(null);
+    await AsyncStorage.removeItem(PROFILE_CACHE_KEY).catch(() => {});
+    // Also clear chats cache so next user doesn't see stale data
+    await AsyncStorage.removeItem(CHATS_CACHE_KEY).catch(() => {});
   };
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) return;
-    const merged = { ...userProfile, ...updates } as UserProfile;
+    const current = getEffectiveProfile(userProfile, user);
+    const merged = { ...current, ...updates } as UserProfile;
     if (updates.username) {
       merged.usernameLower = updates.username.toLowerCase();
+      // Also update Firebase Auth displayName
+      try {
+        await firebaseUpdateProfile(user, { displayName: updates.username });
+      } catch {}
+    }
+    if (updates.photoURL) {
+      try {
+        await firebaseUpdateProfile(user, { photoURL: updates.photoURL });
+      } catch {}
     }
     await setDoc(doc(db, 'users', user.uid), merged, { merge: true });
     setUserProfile(merged);
+    await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
   };
 
+  // Expose a method to get the effective profile (with fallback)
+  const effectiveProfile = getEffectiveProfile(userProfile, user);
+
   return (
-    <AuthContext.Provider value={{ user, userProfile, loading, signIn, signUp, signOut, updateProfile }}>
+    <AuthContext.Provider value={{ user, userProfile: effectiveProfile, loading, signIn, signUp, signOut, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

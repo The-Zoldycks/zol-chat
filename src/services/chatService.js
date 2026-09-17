@@ -399,7 +399,10 @@ export function subscribeToMessages(chatId, onData) {
   const messageQuery = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'));
   return onSnapshot(messageQuery, (snapshot) => {
     snapshotReceived = true;
-    let docs = snapshot.docs.map((messageDoc) => ({ id: messageDoc.id, ...messageDoc.data() }));
+    let docs = snapshot.docs.map((messageDoc) => ({
+      id: messageDoc.id,
+      ...messageDoc.data({ serverTimestamps: 'estimate' }),
+    }));
     if (chatId === GLOBAL_CHAT_ID) {
       const cutoff = Date.now() - 72 * 60 * 60 * 1000;
       docs = docs.filter((msg) => {

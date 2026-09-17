@@ -1,6 +1,13 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
-import { initializeFirestore } from 'firebase/firestore';
+import {
+  initializeAuth,
+  getAuth,
+  getReactNativePersistence,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+} from 'firebase/auth';
+import { initializeFirestore, getFirestore } from 'firebase/firestore';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
@@ -14,10 +21,31 @@ const firebaseConfig = {
 
 const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
 
-export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-});
+function getOrInitAuth() {
+  try {
+    const persistence =
+      Platform.OS === 'web'
+        ? [indexedDBLocalPersistence, browserLocalPersistence]
+        : getReactNativePersistence(AsyncStorage);
+    return initializeAuth(app, { persistence });
+  } catch {
+    // initializeAuth throws if auth was already initialized (e.g. hot reload)
+    return getAuth(app);
+  }
+}
+
+export const auth = getOrInitAuth();
+
+function getOrInitFirestore() {
+  try {
+    return initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  } catch {
+    return getFirestore(app);
+  }
+}
+
+export const db = getOrInitFirestore();
+
 
