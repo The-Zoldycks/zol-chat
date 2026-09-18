@@ -422,6 +422,18 @@ export default function ChatScreen() {
       )
     : allMessages;
 
+  const lastMessageId = filteredMessages.length > 0
+    ? filteredMessages[filteredMessages.length - 1].id
+    : null;
+
+  useEffect(() => {
+    if (!wasAtBottom.current) return;
+    const t = setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: false });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [lastMessageId]);
+
   const renderMessage = ({ item }: { item: any }) => {
     const isOwn = item.senderId === user?.uid;
     const isBotMsg = item.senderId === 'zolbot';
@@ -582,7 +594,9 @@ export default function ChatScreen() {
         {searchVisible && (
           <View style={[styles.searchBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
             <View style={[styles.searchInputContainer, { backgroundColor: colors.inputBackground }]}>
-              <MaterialIcons name="search" size={16} color={colors.textTertiary} />
+              <View style={styles.searchIconSlot}>
+                <MaterialIcons name="search" size={16} color={colors.textTertiary} />
+              </View>
               <TextInput
                 style={[styles.searchTextInput, { color: colors.text }]}
                 value={searchQuery}
@@ -611,7 +625,6 @@ export default function ChatScreen() {
             keyExtractor={(item) => item.id || Math.random().toString()}
             renderItem={renderMessage}
             contentContainerStyle={styles.messagesList}
-            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
             onScrollBeginDrag={() => { wasAtBottom.current = false; Keyboard.dismiss(); }}
             onScrollEndDrag={(e) => {
               const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
@@ -620,12 +633,16 @@ export default function ChatScreen() {
             }}
             onContentSizeChange={() => {
               if (wasAtBottom.current) {
-                flatListRef.current?.scrollToEnd({ animated: false });
+                setTimeout(() => {
+                  flatListRef.current?.scrollToEnd({ animated: false });
+                }, 0);
               }
             }}
             onLayout={() => {
               if (wasAtBottom.current) {
-                flatListRef.current?.scrollToEnd({ animated: false });
+                setTimeout(() => {
+                  flatListRef.current?.scrollToEnd({ animated: false });
+                }, 0);
               }
             }}
             ListEmptyComponent={
@@ -1025,10 +1042,18 @@ const styles = StyleSheet.create({
     height: 36,
     gap: 6,
   },
+  searchIconSlot: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   searchTextInput: {
     flex: 1,
     fontSize: 14,
+    lineHeight: 18,
     padding: 0,
+    textAlignVertical: 'center',
   },
   messagesContainer: {
     flex: 1,

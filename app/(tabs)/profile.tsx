@@ -60,10 +60,25 @@ export default function ProfileScreen() {
     if (!result.canceled && result.assets[0]) {
       setUploading(true);
       try {
-        const url = await uploadToCloudinary(result.assets[0].uri);
-        await updateProfile({ photoURL: url });
-      } catch (e: any) {
-        Alert.alert('Upload Failed', e.message);
+        const localUri = result.assets[0].uri;
+        console.log('[Profile] picked image:', localUri);
+        let url: string;
+        try {
+          url = await uploadToCloudinary(localUri);
+        } catch (e: any) {
+          console.warn('[Profile] image upload failed:', e?.message);
+          Alert.alert('Upload Failed', e?.message || 'Could not upload image');
+          return;
+        }
+        console.log('[Profile] uploaded image url:', url);
+        try {
+          await updateProfile({ photoURL: url });
+        } catch (e: any) {
+          console.warn('[Profile] saving photoURL failed:', e?.message);
+          Alert.alert('Save Failed', e?.message || 'Could not save profile photo');
+          return;
+        }
+        console.log('[Profile] profile photo saved');
       } finally {
         setUploading(false);
       }

@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 /**
  * Uploads an image file to Cloudinary using an unsigned upload preset.
  * @param {string} imageUri - Local URI of the image (e.g., from expo-image-picker)
@@ -17,11 +19,19 @@ export async function uploadToCloudinary(imageUri) {
   const mimeType = mimeMap[ext] || 'image/jpeg';
 
   const formData = new FormData();
-  formData.append('file', {
-    uri: imageUri,
-    type: mimeType,
-    name: `upload_${Date.now()}.${ext}`,
-  });
+  if (Platform.OS === 'web') {
+    // On web, FormData file parts must be Blobs - plain { uri, type, name }
+    // objects throw and the upload can never succeed.
+    const picked = await fetch(imageUri);
+    const blob = await picked.blob();
+    formData.append('file', blob, `upload_${Date.now()}.${ext}`);
+  } else {
+    formData.append('file', {
+      uri: imageUri,
+      type: mimeType,
+      name: `upload_${Date.now()}.${ext}`,
+    });
+  }
   formData.append('upload_preset', uploadPreset);
 
   const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {

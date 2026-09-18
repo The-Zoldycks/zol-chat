@@ -59,6 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const appState = useRef(AppState.currentState);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const profileWriteRef = useRef(0);
+  const profilePendingRef = useRef(0);
 
   useEffect(() => {
     if (!user) return;
@@ -99,9 +101,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
-        // Set immediate fallback from Firebase user
+        // Set immediate fallback from Firebase user (unless a profile write is
+        // in flight - that state is fresher than anything derived here)
         const fallbackProfile = profileFromFirebaseUser(firebaseUser);
-        setUserProfile(fallbackProfile);
+        if (profilePendingRef.current === 0) {
+          setUserProfile(fallbackProfile);
+        }
 
         // Try getting cached profile first to avoid flickering
         try {
@@ -109,37 +114,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (cached) {
             const parsed = JSON.parse(cached);
             if (parsed && parsed.uid === firebaseUser.uid && parsed.username) {
-              setUserProfile(parsed);
+              if (profilePendingRef.current === 0) {
+                setUserProfile((current) => (current?.photoURL ? current : parsed));
+              }
             }
           }
         } catch {}
 
         // Fetch fresh profile from Firestore
         try {
+          const versionAtFetch = profileWriteRef.current;
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          if (userDoc.exists()) {
-            const profile = userDoc.data() as UserProfile;
-            if (profile && profile.username) {
-              setUserProfile(profile);
-              await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+          if (profilePendingRef.current === 0 && profileWriteRef.current === versionAtFetch) {
+            if (userDoc.exists()) {
+              const profile = userDoc.data() as UserProfile;
+              if (profile && profile.username) {
+                setUserProfile(profile);
+                await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+              } else {
+                // Firestore doc exists but missing username - write the fallback
+                const fixedProfile = { ...fallbackProfile };
+                await setDoc(doc(db, 'users', firebaseUser.uid), {
+                  ...fixedProfile,
+                  createdAt: serverTimestamp(),
+                }, { merge: true });
+                setUserProfile(fixedProfile);
+                await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fixedProfile)).catch(() => {});
+              }
             } else {
-              // Firestore doc exists but missing username - write the fallback
-              const fixedProfile = { ...fallbackProfile };
+              // No Firestore doc - create one
               await setDoc(doc(db, 'users', firebaseUser.uid), {
-                ...fixedProfile,
+                ...fallbackProfile,
                 createdAt: serverTimestamp(),
-              }, { merge: true });
-              setUserProfile(fixedProfile);
-              await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fixedProfile)).catch(() => {});
+              });
+              setUserProfile(fallbackProfile);
+              await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fallbackProfile)).catch(() => {});
             }
-          } else {
-            // No Firestore doc - create one
-            await setDoc(doc(db, 'users', firebaseUser.uid), {
-              ...fallbackProfile,
-              createdAt: serverTimestamp(),
-            });
-            setUserProfile(fallbackProfile);
-            await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(fallbackProfile)).catch(() => {});
           }
         } catch {
           // If Firestore is offline or fails, keep whatever profile we have
@@ -198,19 +208,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const merged = { ...current, ...updates } as UserProfile;
     if (updates.username) {
       merged.usernameLower = updates.username.toLowerCase();
-      // Also update Firebase Auth displayName
-      try {
-        await firebaseUpdateProfile(user, { displayName: updates.username });
-      } catch {}
     }
-    if (updates.photoURL) {
-      try {
-        await firebaseUpdateProfile(user, { photoURL: updates.photoURL });
-      } catch {}
-    }
-    await setDoc(doc(db, 'users', user.uid), merged, { merge: true });
+    profilePendingRef.current += 1;
+    // Reflect changes immediately so the UI updates without waiting on the network
     setUserProfile(merged);
-    await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
+    try {
+      if (updates.username) {
+        // Also update Firebase Auth displayName
+        try {
+          await firebaseUpdateProfile(user, { displayName: updates.username });
+        } catch {}
+      }
+      if (updates.photoURL) {
+        try {
+          await firebaseUpdateProfile(user, { photoURL: updates.photoURL });
+        } catch {}
+      }
+
+      try {
+        await setDoc(doc(db, 'users', user.uid), merged, { merge: true });
+      } catch (e) {
+        // Persist failed - roll back so the UI isn't showing an unsaved profile
+        setUserProfile(current);
+        throw e;
+      }
+
+      // Mark the write as complete so any in-flight auth-listener fetch
+      // that read stale data knows not to overwrite the fresher profile.
+      // Re-assert the merged profile last so it wins over any stale listener write.
+      profileWriteRef.current += 1;
+      setUserProfile(merged);
+      await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
+    } finally {
+      profilePendingRef.current -= 1;
+    }
   };
 
   // Expose a method to get the effective profile (with fallback)

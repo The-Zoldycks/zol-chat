@@ -1,4 +1,4 @@
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useThemeColors } from '../src/hooks/useTheme';
 import { Avatar } from './Avatar';
 
@@ -71,7 +71,7 @@ export function MessageBubble({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
+    paddingHorizontal: Platform.OS === 'web' ? 28 : 16,
     paddingVertical: 3,
   },
   avatarCol: {

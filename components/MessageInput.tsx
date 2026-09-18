@@ -1,4 +1,4 @@
-import { View, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useThemeColors } from '../src/hooks/useTheme';
 
@@ -64,7 +64,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 20 : 8,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
@@ -80,10 +80,12 @@ const styles = StyleSheet.create({
   input: {
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 8,
     fontSize: 16,
-    maxHeight: 100,
-    minHeight: 40,
+    lineHeight: 20,
+    maxHeight: 120,
+    minHeight: 38,
+    textAlignVertical: 'center',
   },
   sendBtn: {
     width: 40,

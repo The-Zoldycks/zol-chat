@@ -14,7 +14,9 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search...', styl
 
   return (
     <View style={[styles.container, { backgroundColor: colors.inputBackground }, style]}>
-      <MaterialIcons name="search" size={20} color={colors.textTertiary} />
+      <View style={styles.iconSlot}>
+        <MaterialIcons name="search" size={20} color={colors.textTertiary} />
+      </View>
       <TextInput
         style={[styles.input, { color: colors.text }]}
         value={value}
@@ -24,12 +26,14 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search...', styl
         autoCorrect={false}
       />
       {value.length > 0 && (
-        <MaterialIcons
-          name="close"
-          size={18}
-          color={colors.textTertiary}
-          onPress={() => onChangeText('')}
-        />
+        <View style={styles.iconSlot}>
+          <MaterialIcons
+            name="close"
+            size={18}
+            color={colors.textTertiary}
+            onPress={() => onChangeText('')}
+          />
+        </View>
       )}
     </View>
   );
@@ -44,9 +48,17 @@ const styles = StyleSheet.create({
     height: 44,
     gap: 8,
   },
+  iconSlot: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   input: {
     flex: 1,
     fontSize: 16,
+    lineHeight: 20,
     padding: 0,
+    textAlignVertical: 'center',
   },
 });
