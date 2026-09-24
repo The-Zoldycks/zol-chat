@@ -233,6 +233,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw e;
       }
 
+
+
       // Mark the write as complete so any in-flight auth-listener fetch
       // that read stale data knows not to overwrite the fresher profile.
       // Re-assert the merged profile last so it wins over any stale listener write.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   FlatList,
@@ -19,6 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useThemeColors } from '../../src/hooks/useTheme';
+import { useUserProfiles } from '../../src/hooks/useUserProfiles';
 import { ChatListItem } from '../../components/ChatListItem';
 import { Avatar } from '../../components/Avatar';
 import { SearchBar } from '../../components/SearchBar';
@@ -203,10 +204,25 @@ export default function ChatsScreen() {
       const other = Object.entries(chat.participantMeta).find(
         ([key]) => key !== user?.uid && key !== 'zolbot'
       );
-      if (other) return (other[1] as any)?.username || 'User';
+      if (other) return liveProfiles[other[0]]?.username || (other[1] as any)?.username || 'User';
     }
     return 'Chat';
   };
+
+  // Live profile photos: the users collection is the single source of truth,
+  // so avatars refresh everywhere the moment someone changes their photo.
+  const otherUids = useMemo(() => {
+    const ids = new Set<string>();
+    chats.forEach((chat) => {
+      if (chat.participantMeta) {
+        Object.keys(chat.participantMeta).forEach((uid) => {
+          if (uid !== user?.uid && uid !== 'zolbot') ids.add(uid);
+        });
+      }
+    });
+    return [...ids];
+  }, [chats, user]);
+  const liveProfiles = useUserProfiles(otherUids);
 
   const getChatAvatar = (chat: any) => {
     if (!chat) return null;
@@ -216,7 +232,7 @@ export default function ChatsScreen() {
       const other = Object.entries(chat.participantMeta).find(
         ([key]) => key !== user?.uid && key !== 'zolbot'
       );
-      if (other) return (other[1] as any)?.photoURL || null;
+      if (other) return liveProfiles[other[0]]?.photoURL || (other[1] as any)?.photoURL || null;
     }
     return null;
   };
@@ -234,9 +250,9 @@ export default function ChatsScreen() {
         seen.add(other[0]);
         contacts.push({
           uid: other[0],
-          username: (other[1] as any)?.username || 'User',
+          username: liveProfiles[other[0]]?.username || (other[1] as any)?.username || 'User',
           email: (other[1] as any)?.email || '',
-          photoURL: (other[1] as any)?.photoURL || null,
+          photoURL: liveProfiles[other[0]]?.photoURL || (other[1] as any)?.photoURL || null,
         });
       }
       if (contacts.length >= 10) break;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useThemeColors } from '../../src/hooks/useTheme';
+import { useUserProfiles } from '../../src/hooks/useUserProfiles';
 import { SearchBar } from '../../components/SearchBar';
 import { Avatar } from '../../components/Avatar';
 import {
@@ -93,17 +94,32 @@ export default function SearchScreen() {
       const other = Object.entries(chat.participantMeta).find(
         ([key]) => key !== user?.uid
       );
-      if (other) return (other[1] as any)?.username || 'User';
+      if (other) return liveProfiles[other[0]]?.username || (other[1] as any)?.username || 'User';
     }
     return 'Chat';
   };
+
+  // Live profile photos: the users collection is the single source of truth,
+  // so avatars refresh everywhere the moment someone changes their photo.
+  const recentChatUids = useMemo(() => {
+    const ids = new Set<string>();
+    recentChats.forEach((chat) => {
+      if (chat.participantMeta) {
+        Object.keys(chat.participantMeta).forEach((uid) => {
+          if (uid !== user?.uid && uid !== 'zolbot') ids.add(uid);
+        });
+      }
+    });
+    return [...ids];
+  }, [recentChats, user]);
+  const liveProfiles = useUserProfiles(recentChatUids);
 
   const getRecentChatAvatar = (chat: any) => {
     if (chat.participantMeta) {
       const other = Object.entries(chat.participantMeta).find(
         ([key]) => key !== user?.uid
       );
-      if (other) return (other[1] as any)?.photoURL || null;
+      if (other) return liveProfiles[other[0]]?.photoURL || (other[1] as any)?.photoURL || null;
     }
     return null;
   };

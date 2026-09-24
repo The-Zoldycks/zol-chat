@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { db } from '../../src/services/firebase';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { useThemeColors } from '../../src/hooks/useTheme';
+import { useUserProfiles } from '../../src/hooks/useUserProfiles';
 import { Avatar } from '../../components/Avatar';
 import { MessageBubble } from '../../components/MessageBubble';
 import { MessageInput } from '../../components/MessageInput';
@@ -222,14 +223,23 @@ export default function ChatScreen() {
     if (isGlobal) return 'Global Chat';
     if (isZolbot) return 'Zolbot';
     if (isGroup) return chatData?.groupName || 'Group Chat';
+    const otherUid = getOtherUid();
+    if (otherUid && liveProfiles[otherUid]?.username) return liveProfiles[otherUid].username;
     const other = getOtherUser();
     return other?.username || 'Chat';
+  };
+
+  const getOtherUid = () => {
+    if (!chatData?.participantMeta || !user) return null;
+    return Object.keys(chatData.participantMeta).find((key) => key !== user.uid) || null;
   };
 
   const getChatAvatar = () => {
     if (isZolbot) return null;
     if (isGlobal) return null;
     if (isGroup && chatData?.groupImage) return chatData.groupImage;
+    const otherUid = getOtherUid();
+    if (otherUid && liveProfiles[otherUid]?.photoURL) return liveProfiles[otherUid].photoURL;
     const other = getOtherUser();
     return other?.photoURL || null;
   };
@@ -241,11 +251,13 @@ export default function ChatScreen() {
     return 'Multiple people typing...';
   };
 
-  const getProfileImageForSender = (senderId: string) => {
-    if (chatData?.participantMeta?.[senderId]?.photoURL) {
-      return chatData.participantMeta[senderId].photoURL;
-    }
-    return null;
+  const getProfileImageForSender = (senderId: string, fallback?: string | null) => {
+    return liveProfiles[senderId]?.photoURL || chatData?.participantMeta?.[senderId]?.photoURL || fallback || null;
+  };
+
+  const getLiveUsername = (uid: string | undefined, fallback?: string | null) => {
+    if (uid && liveProfiles[uid]?.username) return liveProfiles[uid].username;
+    return fallback || null;
   };
 
   const handleSend = async () => {
@@ -322,13 +334,15 @@ export default function ChatScreen() {
       setTyping(chatId, user.uid, false);
     }
 
+    const withLiveNames = (list: any[]) =>
+      list.map((p) => ({ ...p, username: getLiveUsername(p.uid, p.username) || p.username }));
     const lastAt = value.lastIndexOf('@');
     if (lastAt >= 0 && lastAt === value.length - 1) {
       const participants = getParticipants();
-      const suggestions = [
+      const suggestions = withLiveNames([
         { uid: 'zolbot', username: 'Zolbot', isBot: true },
         ...participants.filter((p) => p.uid !== user?.uid && p.uid !== 'zolbot'),
-      ];
+      ]);
       setMentionSuggestions(suggestions);
       setShowMentions(true);
     } else if (lastAt >= 0 && lastAt === value.length - 2) {
@@ -336,10 +350,10 @@ export default function ChatScreen() {
     } else if (lastAt >= 0 && value.length > lastAt + 1) {
       const query = value.substring(lastAt + 1).toLowerCase();
       const participants = getParticipants();
-      const filtered = [
+      const filtered = withLiveNames([
         { uid: 'zolbot', username: 'Zolbot', isBot: true },
         ...participants.filter((p) => p.uid !== user?.uid && p.uid !== 'zolbot'),
-      ].filter((p) => p.username?.toLowerCase().includes(query));
+      ]).filter((p) => p.username?.toLowerCase().includes(query));
       setMentionSuggestions(filtered);
       setShowMentions(filtered.length > 0);
     } else {
@@ -434,6 +448,24 @@ export default function ChatScreen() {
     return () => clearTimeout(t);
   }, [lastMessageId]);
 
+  // Live profile photos: the users collection is the single source of truth,
+  // so avatars refresh everywhere the moment someone changes their photo.
+  const senderIds = useMemo(() => {
+    const ids = new Set<string>();
+    filteredMessages.forEach((m: any) => {
+      if (m.senderId) ids.add(m.senderId);
+    });
+    // Include chat participants so the header and profile sheet resolve live
+    // too, even before anyone has sent a message.
+    if (chatData?.participantMeta) {
+      Object.keys(chatData.participantMeta).forEach((uid) => {
+        if (uid !== 'zolbot') ids.add(uid);
+      });
+    }
+    return [...ids];
+  }, [filteredMessages, chatData]);
+  const liveProfiles = useUserProfiles(senderIds);
+
   const renderMessage = ({ item }: { item: any }) => {
     const isOwn = item.senderId === user?.uid;
     const isBotMsg = item.senderId === 'zolbot';
@@ -487,8 +519,8 @@ export default function ChatScreen() {
     return (
       <MessageBubble
         text={item.text || ''}
-        senderName={item.senderUsername || 'User'}
-        senderPhotoURL={getProfileImageForSender(item.senderId) || item.senderPhotoURL}
+        senderName={getLiveUsername(item.senderId, item.senderUsername) || 'User'}
+        senderPhotoURL={getProfileImageForSender(item.senderId, item.senderPhotoURL)}
         timestamp={isPending ? '' : formatTime(item.createdAt)}
         isOwn={isOwn}
         isBot={isBotMsg}
@@ -513,12 +545,12 @@ export default function ChatScreen() {
   };
 
   const getProfileSheetAvatar = () => {
-    if (profileSheetUser) return profileSheetUser.photoURL || null;
+    if (profileSheetUser) return liveProfiles[profileSheetUser.uid]?.photoURL || profileSheetUser.photoURL || null;
     return getChatAvatar();
   };
 
   const getProfileSheetTitle = () => {
-    if (profileSheetUser) return profileSheetUser.username || 'User';
+    if (profileSheetUser) return getLiveUsername(profileSheetUser.uid, profileSheetUser.username) || 'User';
     return getChatTitle();
   };
 
@@ -814,10 +846,10 @@ export default function ChatScreen() {
                           }
                         }}
                       >
-                        <Avatar uri={member.photoURL} size={36} isBot={member.isBot} />
+                        <Avatar uri={liveProfiles[member.uid]?.photoURL || member.photoURL} size={36} isBot={member.isBot} />
                         <View style={styles.profileMemberInfo}>
                           <Text style={[styles.profileMemberName, { color: colors.text }]}>
-                            {member.username}
+                            {getLiveUsername(member.uid, member.username) || member.username}
                           </Text>
                           {chatData.groupAdmins?.includes(member.uid) && (
                             <Text style={[styles.profileMemberRole, { color: colors.primary }]}>

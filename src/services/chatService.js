@@ -817,6 +817,45 @@ export function subscribeToUsersPresence(uids, onPresenceChange) {
   return () => unsubs.forEach((u) => u());
 }
 
+/**
+ * Live-resolves user profiles (username + photoURL) from the users collection
+ * (the single source of truth). Names and avatars displayed anywhere should
+ * prefer this over the denormalized snapshots stored in participantMeta /
+ * messages.
+ */
+export function subscribeToUserProfiles(uids, onProfilesChange) {
+  if (!uids || uids.length === 0) {
+    onProfilesChange({});
+    return () => {};
+  }
+  const unique = [...new Set(uids.filter((u) => u && u !== 'zolbot'))];
+  if (unique.length === 0) {
+    onProfilesChange({});
+    return () => {};
+  }
+  const profilesMap = {};
+  const emit = () => onProfilesChange({ ...profilesMap });
+
+  const unsubs = [];
+  const chunkSize = 10;
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const q = query(collection(db, 'users'), where('__name__', 'in', chunk));
+    const unsub = onSnapshot(q, (snap) => {
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        profilesMap[docSnap.id] = {
+          username: data.username || '',
+          photoURL: data.photoURL || '',
+        };
+      });
+      emit();
+    }, () => {});
+    unsubs.push(unsub);
+  }
+  return () => unsubs.forEach((u) => u());
+}
+
 export function subscribeToPresence(chatId, uid, onPresenceChange) {
   const presenceRef = collection(db, 'chats', chatId, 'presence');
   return onSnapshot(presenceRef, (snapshot) => {
@@ -842,4 +881,5 @@ export async function clearPresence(chatId, uid) {
     // Presence cleanup is best-effort
   }
 }
+
 
