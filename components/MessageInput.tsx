@@ -28,7 +28,7 @@ export function MessageInput({
         <MaterialIcons name="image" size={24} color={colors.primary} />
       </TouchableOpacity>
 
-      <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground }]}>
+      <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
         <TextInput
           style={[styles.input, { color: colors.text }]}
           value={value}
@@ -37,6 +37,9 @@ export function MessageInput({
           placeholderTextColor={colors.textTertiary}
           multiline
           maxLength={2000}
+          // Web renders multiline inputs as <textarea>, which defaults to
+          // 2 rows (a phantom second line). Pin it to 1; it still grows.
+          {...(Platform.OS === 'web' ? ({ rows: 1 } as any) : {})}
         />
       </View>
 
@@ -73,19 +76,21 @@ const styles = StyleSheet.create({
   },
   inputWrapper: {
     flex: 1,
-    borderRadius: 20,
+    borderRadius: 8,
+    borderWidth: 1,
     marginHorizontal: 8,
     justifyContent: 'center',
   },
   input: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     fontSize: 16,
     lineHeight: 20,
     maxHeight: 120,
-    minHeight: 38,
+    minHeight: 36,
     textAlignVertical: 'center',
+    outlineStyle: 'none' as any,
   },
   sendBtn: {
     width: 40,

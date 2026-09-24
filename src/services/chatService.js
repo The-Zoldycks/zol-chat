@@ -527,6 +527,7 @@ export async function sendMessage(chatId, sender, text) {
 
   await updateDoc(doc(db, 'chats', chatId), {
     lastMessage: trimmed,
+    lastMessageSenderId: senderId,
     updatedAt: serverTimestamp(),
   });
 
@@ -701,6 +702,7 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
 
     await updateDoc(doc(db, 'chats', chatId), {
       lastMessage: botText,
+      lastMessageSenderId: 'zolbot',
       updatedAt: serverTimestamp(),
     });
 
@@ -756,6 +758,7 @@ export async function forwardMessage(targetChatId, sender, originalText, origina
 
   await updateDoc(doc(db, 'chats', targetChatId), {
     lastMessage: originalImageUrl ? '📷 Photo' : text,
+    lastMessageSenderId: senderId,
     updatedAt: serverTimestamp(),
   });
 }
@@ -783,6 +786,7 @@ export async function sendImageMessage(chatId, sender, imageUrl) {
 
   await updateDoc(doc(db, 'chats', chatId), {
     lastMessage: '📷 Photo',
+    lastMessageSenderId: senderId,
     updatedAt: serverTimestamp(),
   });
 }

@@ -259,6 +259,23 @@ export default function ChatsScreen() {
     return null;
   };
 
+  const getLastMessagePreview = (chat: any) => {
+    const senderId = (chat as any)?.lastMessageSenderId;
+    let prefix = '';
+    if (senderId) {
+      if (senderId === user?.uid) {
+        prefix = 'You';
+      } else if (chat.isGroup || chat.isGlobal) {
+        prefix =
+          liveProfiles[senderId]?.username ||
+          (chat.participantMeta?.[senderId] as any)?.username ||
+          'User';
+      }
+    }
+    const body = chat.lastMessage || '';
+    return prefix ? `${prefix}: ${body}` : body;
+  };
+
   const getRecentContacts = () => {
     const seen = new Set<string>();
     const contacts: any[] = [];
@@ -332,7 +349,7 @@ export default function ChatsScreen() {
         renderItem={({ item }) => (
           <ChatListItem
             name={getChatDisplayName(item)}
-            lastMessage={item.lastMessage || ''}
+            lastMessage={getLastMessagePreview(item)}
             timestamp={formatTimestamp(item.updatedAt)}
             unreadCount={unreadCounts[item.id] || 0}
             avatarUri={getChatAvatar(item)}

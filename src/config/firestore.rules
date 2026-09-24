@@ -26,7 +26,7 @@ service cloud.firestore {
         && (chatId == 'global_chat' || (
           request.auth.uid in resource.data.participants && (
             // Ordinary message + read-receipt flow touches only these keys.
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'updatedAt', 'participantMeta'])
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'lastMessageSenderId', 'updatedAt', 'participantMeta'])
             // Group admins (or anyone when no admins remain) may manage the group.
             || request.auth.uid in resource.data.get('groupAdmins', [])
             || resource.data.get('groupAdmins', []).size() == 0
