@@ -40,13 +40,17 @@ import {
   leaveGroup,
   subscribeToUsersPresence,
   subscribeToChats,
+  toggleMessageReaction,
   GLOBAL_CHAT_ID,
 } from '../../src/services/chatService';
 import { uploadToCloudinary } from '../../src/services/cloudinaryService';
 import { confirm } from '../../src/utils/confirm';
 import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+
+const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
 
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
@@ -59,6 +63,7 @@ export default function ChatScreen() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [reactTarget, setReactTarget] = useState<any>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [presence, setPresence] = useState<Record<string, any>>({});
@@ -333,6 +338,30 @@ export default function ChatScreen() {
     }
   };
 
+  const handleReact = async (messageId: string, emoji: string) => {
+    setReactTarget(null);
+    if (!user) return;
+    try {
+      await toggleMessageReaction(chatId, messageId, user.uid, emoji);
+      console.log('[Chat] reaction saved:', messageId, emoji);
+    } catch (e: any) {
+      console.warn('[Chat] reaction failed:', e?.message);
+      Alert.alert('Error', e?.message || 'Could not add reaction');
+    }
+  };
+
+  const handleCopyMessage = async () => {
+    const target = reactTarget;
+    setReactTarget(null);
+    if (target?.text) {
+      try {
+        await Clipboard.setStringAsync(target.text);
+      } catch (e: any) {
+        Alert.alert('Error', e?.message || 'Could not copy message');
+      }
+    }
+  };
+
   const handleTextChange = (value: string) => {
     setText(value);
     if (!chatId || !user) return;
@@ -549,8 +578,12 @@ export default function ChatScreen() {
         isPending={isPending}
         isGroup={isGroup || isGlobal}
         imageUrl={item.imageUrl}
+        reactions={item.reactions}
+        currentUid={user?.uid}
+        onReact={(emoji) => handleReact(item.id, emoji)}
         onImagePress={(uri) => setImageViewerUri(uri)}
         onAvatarPress={handleAvatarPress}
+        onLongPress={isPending ? undefined : () => setReactTarget(item)}
       />
     );
   };
@@ -790,6 +823,42 @@ export default function ChatScreen() {
                   <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete Chat</Text>
                 </TouchableOpacity>
               )}
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Message Actions Modal */}
+        <Modal visible={!!reactTarget} transparent animationType="slide">
+          <TouchableOpacity
+            style={styles.profileSheetOverlay}
+            activeOpacity={1}
+            onPress={() => setReactTarget(null)}
+          >
+            <View style={[styles.menuSheet, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+              <View style={[styles.profileSheetHandle, { backgroundColor: colors.text }]} />
+              <View style={styles.quickReactRow}>
+                {QUICK_REACTIONS.map((emoji) => {
+                  const mine = user?.uid ? reactTarget?.reactions?.[user.uid] === emoji : false;
+                  return (
+                    <TouchableOpacity
+                      key={emoji}
+                      style={[styles.quickReactBtn, mine && { backgroundColor: colors.primary + '20' }]}
+                      onPress={() => handleReact(reactTarget.id, emoji)}
+                    >
+                      <Text style={styles.quickReactEmoji}>{emoji}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {reactTarget?.text ? (
+                <TouchableOpacity
+                  style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                  onPress={handleCopyMessage}
+                >
+                  <MaterialIcons name="content-copy" size={22} color={colors.textSecondary} />
+                  <Text style={[styles.menuItemText, { color: colors.text }]}>Copy</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </TouchableOpacity>
         </Modal>
@@ -1170,6 +1239,22 @@ const styles = StyleSheet.create({
   menuItemText: {
     fontSize: 15,
     fontWeight: '500',
+  },
+  quickReactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  quickReactBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickReactEmoji: {
+    fontSize: 26,
   },
   profileSheetOverlay: {
     flex: 1,

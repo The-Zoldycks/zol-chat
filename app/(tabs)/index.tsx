@@ -677,10 +677,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    boxShadow: '0px 3px 4px rgba(0, 0, 0, 0.3)',
   },
   fabMenu: {
     position: 'absolute',
@@ -697,10 +694,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     gap: 10,
     elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
+    boxShadow: '0px 2px 3px rgba(0, 0, 0, 0.2)',
   },
   fabMenuText: {
     fontSize: 15,
