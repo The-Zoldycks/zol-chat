@@ -63,7 +63,7 @@ export default function ChatScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [presence, setPresence] = useState<Record<string, any>>({});
   const [imageViewerUri, setImageViewerUri] = useState<string | null>(null);
-  const [typingTimeout, setTypingTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const typingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chatData, setChatData] = useState<any>(null);
   const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]);
   const [showMentions, setShowMentions] = useState(false);
@@ -80,8 +80,11 @@ export default function ChatScreen() {
   const wasAtBottom = useRef<boolean>(true);
 
   const isGlobal = chatId === GLOBAL_CHAT_ID;
-  const isZolbot = chatId?.startsWith('zolbot__');
-  const isGroup = chatId?.startsWith('group_');
+  const isZolbot = chatId?.startsWith('zolbot__') || (chatData?.participantMeta as any)?.zolbot?.isBot === true;
+  const isGroup = chatId?.startsWith('group_') || (chatData as any)?.isGroup === true;
+  const canManageGroup =
+    isGroup &&
+    ((chatData?.groupAdmins?.length ?? 0) === 0 || chatData?.groupAdmins?.includes(user?.uid));
 
   useEffect(() => {
     if (!chatId) return;
@@ -116,6 +119,11 @@ export default function ChatScreen() {
         }
         return next;
       });
+      // Messages arriving while viewing should not stay "unread" in the list.
+      const latest = msgs[msgs.length - 1];
+      if (latest && latest.senderId !== user?.uid) {
+        markChatAsRead(chatId, user.uid).catch(() => {});
+      }
     });
 
     const unsubPresence = subscribeToPresence(chatId, user.uid, (p: Record<string, any>) => {
@@ -133,9 +141,12 @@ export default function ChatScreen() {
 
   useEffect(() => {
     return () => {
-      if (typingTimeout) clearTimeout(typingTimeout);
+      if (typingTimeout.current) clearTimeout(typingTimeout.current);
+      if (chatId && user) {
+        Promise.resolve(setTyping(chatId, user.uid, false)).catch(() => {});
+      }
     };
-  }, []);
+  }, [chatId, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -306,16 +317,19 @@ export default function ChatScreen() {
       quality: 0.8,
     });
 
-    if (!result.canceled && result.assets[0] && userProfile && chatId) {
-      setSending(true);
-      try {
-        const url = await uploadToCloudinary(result.assets[0].uri);
-        await sendImageMessage(chatId, userProfile, url);
-      } catch (e: any) {
-        Alert.alert('Error', 'Failed to send image');
-      } finally {
-        setSending(false);
-      }
+    if (result.canceled || !result.assets[0]) return;
+    if (!userProfile || !chatId) {
+      Alert.alert('Not Ready', 'Your profile is still loading. Please try again in a moment.');
+      return;
+    }
+    setSending(true);
+    try {
+      const url = await uploadToCloudinary(result.assets[0].uri);
+      await sendImageMessage(chatId, userProfile, url);
+    } catch (e: any) {
+      Alert.alert('Error', 'Failed to send image');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -325,11 +339,10 @@ export default function ChatScreen() {
 
     if (value.length > 0) {
       setTyping(chatId, user.uid, true);
-      if (typingTimeout) clearTimeout(typingTimeout);
-      const timeout = setTimeout(() => {
+      if (typingTimeout.current) clearTimeout(typingTimeout.current);
+      typingTimeout.current = setTimeout(() => {
         setTyping(chatId, user.uid, false);
       }, 2000);
-      setTypingTimeout(timeout);
     } else {
       setTyping(chatId, user.uid, false);
     }
@@ -388,7 +401,7 @@ export default function ChatScreen() {
   const handleAddMembers = async (newMembers: string[]) => {
     if (!chatId || newMembers.length === 0) return;
     try {
-      await addGroupMembers(chatId, newMembers);
+      await addGroupMembers(chatId, newMembers, user?.uid || '');
       setAddMemberVisible(false);
       setMemberSearch('');
     } catch (e: any) {
@@ -410,7 +423,16 @@ export default function ChatScreen() {
     if (createdAt?.toDate) date = createdAt.toDate();
     else if (createdAt?.seconds) date = new Date(createdAt.seconds * 1000);
     else date = new Date(createdAt);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const now = new Date();
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const days = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+    if (days <= 0) return time;
+    if (days === 1) return `Yesterday, ${time}`;
+    if (days < 7) return `${date.toLocaleDateString([], { weekday: 'short' })}, ${time}`;
+    if (date.getFullYear() === now.getFullYear()) {
+      return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+    }
+    return `${date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}, ${time}`;
   };
 
   const getMsgTime = (m: any) => {
@@ -733,22 +755,26 @@ export default function ChatScreen() {
             <View style={[styles.menuSheet, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
               <View style={[styles.profileSheetHandle, { backgroundColor: colors.text }]} />
 
-              <TouchableOpacity
-                style={[styles.menuItem, { borderBottomColor: colors.border }]}
-                onPress={handleClearChat}
-              >
-                <MaterialIcons name="delete-sweep" size={22} color={colors.danger} />
-                <Text style={[styles.menuItemText, { color: colors.danger }]}>Clear Chat</Text>
-              </TouchableOpacity>
+              {!isGlobal && (
+                <TouchableOpacity
+                  style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                  onPress={handleClearChat}
+                >
+                  <MaterialIcons name="delete-sweep" size={22} color={colors.danger} />
+                  <Text style={[styles.menuItemText, { color: colors.danger }]}>Clear Chat</Text>
+                </TouchableOpacity>
+              )}
               {isGroup && (
                 <>
-                  <TouchableOpacity
-                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
-                    onPress={() => { setMenuVisible(false); setAddMemberVisible(true); }}
-                  >
-                    <MaterialIcons name="person-add" size={22} color={colors.primary} />
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>Add Members</Text>
-                  </TouchableOpacity>
+                  {canManageGroup && (
+                    <TouchableOpacity
+                      style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                      onPress={() => { setMenuVisible(false); setAddMemberVisible(true); }}
+                    >
+                      <MaterialIcons name="person-add" size={22} color={colors.primary} />
+                      <Text style={[styles.menuItemText, { color: colors.text }]}>Add Members</Text>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
                     style={[styles.menuItem, { borderBottomColor: colors.border }]}
                     onPress={handleLeaveGroup}
@@ -758,10 +784,12 @@ export default function ChatScreen() {
                   </TouchableOpacity>
                 </>
               )}
-              <TouchableOpacity style={styles.menuItem} onPress={handleDeleteChat}>
-                <MaterialIcons name="delete-forever" size={22} color={colors.danger} />
-                <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete Chat</Text>
-              </TouchableOpacity>
+              {!isGlobal && (
+                <TouchableOpacity style={styles.menuItem} onPress={handleDeleteChat}>
+                  <MaterialIcons name="delete-forever" size={22} color={colors.danger} />
+                  <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete Chat</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </TouchableOpacity>
         </Modal>

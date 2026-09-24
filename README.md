@@ -54,3 +54,8 @@ src/
   hooks/ config/ utils/
 assets/               # icons, splash
 ```
+
+## Notes
+
+- Chat history subscriptions are capped (latest 100 messages per chat); older history needs pagination if message volume grows.
+- Security rules live in `src/config/firestore.rules` — deploy them with `firebase deploy --only firestore:rules` and verify in the Firebase console simulator before any public release. Key enforcements: users can only write their own doc, message text is sender-owned (reactions open to participants), and group membership/admin changes require a group admin.

@@ -105,7 +105,7 @@ export default function LoginScreen() {
         <Link href="/(auth)/register" asChild>
           <TouchableOpacity style={styles.linkButton}>
             <Text style={[styles.linkText, { color: colors.textSecondary }]}>
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Text style={{ color: colors.primary, fontWeight: '600' }}>Sign Up</Text>
             </Text>
           </TouchableOpacity>

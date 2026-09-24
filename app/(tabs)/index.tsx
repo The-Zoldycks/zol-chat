@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   FlatList,
@@ -57,6 +57,31 @@ export default function ChatsScreen() {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [profileSheetChat, setProfileSheetChat] = useState<any>(null);
   const [onlineUsers, setOnlineUsers] = useState<Record<string, { online: boolean }>>({});
+  const unreadReqRef = useRef(0);
+  const unreadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounced + request-guarded so rapid snapshots can't overwrite counts
+  // with stale out-of-order resolutions.
+  const refreshUnread = useCallback((list: any[]) => {
+    if (!user) return;
+    const req = ++unreadReqRef.current;
+    getUnreadCounts(user.uid, list).then((counts) => {
+      if (unreadReqRef.current === req) {
+        setUnreadCounts(counts as Record<string, number>);
+      }
+    }).catch(() => {});
+  }, [user]);
+
+  const scheduleUnreadRefresh = useCallback((list: any[]) => {
+    if (unreadTimerRef.current) clearTimeout(unreadTimerRef.current);
+    unreadTimerRef.current = setTimeout(() => refreshUnread(list), 500);
+  }, [refreshUnread]);
+
+  useEffect(() => {
+    return () => {
+      if (unreadTimerRef.current) clearTimeout(unreadTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -64,12 +89,11 @@ export default function ChatsScreen() {
 
     let globalChatData: any = null;
 
-    const unsubChats = subscribeToChats(user.uid, async (chatList: any[]) => {
+    const unsubChats = subscribeToChats(user.uid, (chatList: any[]) => {
       const filtered = chatList.filter((c: any) => c.id !== GLOBAL_CHAT_ID);
       const allChats = globalChatData ? [globalChatData, ...filtered] : filtered;
       setChats(allChats);
-      const counts = await getUnreadCounts(user.uid, allChats);
-      setUnreadCounts(counts as Record<string, number>);
+      scheduleUnreadRefresh(allChats);
     });
 
     const unsubGlobal = onSnapshot(doc(db, 'chats', GLOBAL_CHAT_ID), (snap) => {
@@ -86,7 +110,7 @@ export default function ChatsScreen() {
       unsubChats();
       unsubGlobal();
     };
-  }, [user]);
+  }, [user, scheduleUnreadRefresh]);
 
   useEffect(() => {
     if (!user || chats.length === 0) return;
@@ -118,10 +142,8 @@ export default function ChatsScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!user || chats.length === 0) return;
-      getUnreadCounts(user.uid, chats).then((counts) => {
-        setUnreadCounts(counts as Record<string, number>);
-      }).catch(() => {});
-    }, [user, chats])
+      refreshUnread(chats);
+    }, [user, chats, refreshUnread])
   );
 
   const onRefresh = useCallback(() => {
@@ -271,14 +293,17 @@ export default function ChatsScreen() {
     const diff = now.getTime() - date.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     if (days === 0) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return time;
     } else if (days === 1) {
-      return 'Yesterday';
+      return `Yesterday, ${time}`;
     } else if (days < 7) {
-      return date.toLocaleDateString([], { weekday: 'short' });
+      return `${date.toLocaleDateString([], { weekday: 'short' })}, ${time}`;
+    } else if (date.getFullYear() === now.getFullYear()) {
+      return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
     }
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return `${date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}, ${time}`;
   };
 
   const filteredChats = chats.filter((chat) => {

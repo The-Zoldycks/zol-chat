@@ -5,12 +5,22 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { ThemeProvider, useThemeContext } from '../src/contexts/ThemeContext';
+import { registerForPushNotifications, setupNotificationListeners } from '../src/services/notificationService';
 
 function RootLayoutNav() {
   const { user, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const { isDark } = useThemeContext();
+
+  useEffect(() => {
+    if (!user) return;
+    registerForPushNotifications(user.uid).catch(() => {});
+    const cleanup = setupNotificationListeners(undefined, (data: any) => {
+      if (data?.chatId) router.push(`/chat/${data.chatId}`);
+    });
+    return cleanup;
+  }, [user, router]);
 
   useEffect(() => {
     if (loading) return;

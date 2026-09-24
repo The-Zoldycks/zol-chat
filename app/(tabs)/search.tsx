@@ -5,6 +5,7 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -75,7 +76,10 @@ export default function SearchScreen() {
   }, [searchQuery]);
 
   const handleStartChat = async (targetUser: any) => {
-    if (!userProfile) return;
+    if (!userProfile) {
+      Alert.alert('Not Ready', 'Your profile is still loading. Please try again in a moment.');
+      return;
+    }
 
     if (targetUser.uid === 'zolbot') {
       router.push(`/chat/zolbot__${user?.uid}`);
@@ -85,7 +89,9 @@ export default function SearchScreen() {
     try {
       const chatId = await startOrOpenChat(userProfile, targetUser);
       router.push(`/chat/${chatId}`);
-    } catch {}
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not open chat');
+    }
   };
 
   const getRecentChatName = (chat: any) => {

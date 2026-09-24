@@ -96,7 +96,8 @@ export async function purgeOldMessages(uid) {
           ops++;
           if (ops >= 400) {
             await batch.commit();
-            return;
+            batch = writeBatch(db);
+            ops = 0;
           }
         }
       }
@@ -160,16 +161,19 @@ export async function findUsersByEmailOrUsername(term, currentUid) {
   });
 
   if (map.size === 0) {
-    const allSnap = await getDocs(query(usersRef, limit(50)));
-    allSnap.forEach((docSnap) => {
-      const user = docSnap.data();
-      if (user.uid !== currentUid) {
-        const u = (user.username || '').toLowerCase();
-        const e = (user.email || '').toLowerCase();
-        if (u.includes(normalized) || e.includes(normalized)) {
+    // Prefix search instead of downloading user docs for client-side matching.
+    const end = normalized + '\uf8ff';
+    const [nameSnap, emailSnap] = await Promise.all([
+      getDocs(query(usersRef, where('usernameLower', '>=', normalized), where('usernameLower', '<=', end), limit(10))),
+      getDocs(query(usersRef, where('email', '>=', normalized), where('email', '<=', end), limit(10))),
+    ]);
+    [nameSnap, emailSnap].forEach((snap) => {
+      snap.forEach((docSnap) => {
+        const user = docSnap.data();
+        if (user.uid !== currentUid) {
           map.set(user.uid, user);
         }
-      }
+      });
     });
   }
 
@@ -272,15 +276,18 @@ export async function clearChatMessages(chatId) {
   if (chatId === GLOBAL_CHAT_ID) return;
   const msgsRef = collection(db, 'chats', chatId, 'messages');
   const snap = await getDocs(msgsRef);
-  const batch = writeBatch(db);
+  // Firestore batches are single-use and capped at 500 ops: use a fresh
+  // batch per chunk and await every commit.
+  let batch = writeBatch(db);
   let count = 0;
-  snap.forEach((docSnap) => {
+  for (const docSnap of snap.docs) {
     batch.delete(doc(db, 'chats', chatId, 'messages', docSnap.id));
     count++;
     if (count % 500 === 0) {
-      batch.commit();
+      await batch.commit();
+      batch = writeBatch(db);
     }
-  });
+  }
   if (count % 500 !== 0) await batch.commit();
 
   await updateDoc(doc(db, 'chats', chatId), {
@@ -291,11 +298,23 @@ export async function clearChatMessages(chatId) {
   await clearCachedMessages(chatId);
 }
 
-export async function addGroupMembers(chatId, newMemberUids) {
+async function requireGroupAdmin(chatId, callerUid) {
   const chatRef = doc(db, 'chats', chatId);
   const snap = await getDoc(chatRef);
-  if (!snap.exists()) return;
+  if (!snap.exists()) throw new Error('Chat not found');
   const data = snap.data();
+  const admins = data.groupAdmins || [];
+  // If no admins remain, any participant may manage the group (escape hatch
+  // so management can never lock permanently).
+  if (admins.length > 0 && !admins.includes(callerUid)) {
+    throw new Error('Only group admins can do this');
+  }
+  return data;
+}
+
+export async function addGroupMembers(chatId, newMemberUids, callerUid) {
+  const chatRef = doc(db, 'chats', chatId);
+  const data = await requireGroupAdmin(chatId, callerUid);
   const currentParticipants = data.participants || [];
   const updatedParticipants = Array.from(new Set([...currentParticipants, ...newMemberUids]));
 
@@ -332,11 +351,9 @@ export async function addGroupMembers(chatId, newMemberUids) {
   });
 }
 
-export async function toggleGroupAdmin(chatId, targetUid, makeAdmin) {
+export async function toggleGroupAdmin(chatId, targetUid, makeAdmin, callerUid) {
   const chatRef = doc(db, 'chats', chatId);
-  const snap = await getDoc(chatRef);
-  if (!snap.exists()) return;
-  const data = snap.data();
+  const data = await requireGroupAdmin(chatId, callerUid);
   let admins = data.groupAdmins || [];
   if (makeAdmin) {
     if (!admins.includes(targetUid)) admins.push(targetUid);
@@ -357,13 +374,11 @@ export async function leaveGroup(chatId, uid) {
   if (participants.length === 0) {
     await deleteDoc(chatRef);
   } else {
-    let finalAdmins = groupAdmins;
-    if (finalAdmins.length === 0 && participants.length > 0) {
-      finalAdmins = [participants[0]];
-    }
+    // No auto-promotion: if no admins remain, any participant may manage
+    // the group (matches the Firestore rules escape hatch).
     await updateDoc(chatRef, {
       participants,
-      groupAdmins: finalAdmins,
+      groupAdmins,
       updatedAt: serverTimestamp(),
     });
   }
@@ -690,9 +705,10 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
     });
 
   } catch (err) {
-    const detail = err?.message || 'Unknown error';
+    // Never leak raw API error text into the chat - log it, show a generic note.
+    console.warn('[Zolbot] reply failed:', err?.message || err);
     await addDoc(collection(db, 'chats', chatId, 'messages'), {
-      text: `Oops, I ran into an error: ${detail}`,
+      text: "Sorry, I'm having trouble right now. Please try again later.",
       senderId: 'zolbot',
       senderEmail: 'zolbot@zoldyck.ai',
       senderUsername: 'Zolbot',
@@ -701,7 +717,13 @@ Zol Chat is a real-time messaging app built with React Native, Expo (SDK 54), Fi
   }
 }
 
-export async function deleteMessage(chatId, messageId) {
+export async function deleteMessage(chatId, messageId, uid) {
+  if (uid) {
+    const snap = await getDoc(doc(db, 'chats', chatId, 'messages', messageId));
+    if (snap.exists() && snap.data().senderId !== uid) {
+      throw new Error('You can only delete your own messages');
+    }
+  }
   await deleteDoc(doc(db, 'chats', chatId, 'messages', messageId));
   const cached = await getCachedMessages(chatId);
   if (cached.length > 0) {
