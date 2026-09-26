@@ -13,8 +13,12 @@ interface MessageBubbleProps {
   isGroup?: boolean;
   imageUrl?: string;
   reactions?: Record<string, string>;
+  edited?: boolean;
+  replyTo?: { id: string; text: string; senderName: string } | null;
+  highlighted?: boolean;
   currentUid?: string;
   onReact?: (emoji: string) => void;
+  onReplyPress?: (replyTo: { id: string; text: string; senderName: string }) => void;
   onImagePress?: (uri: string) => void;
   onAvatarPress?: () => void;
   onLongPress?: () => void;
@@ -31,8 +35,12 @@ export function MessageBubble({
   isGroup,
   imageUrl,
   reactions,
+  edited,
+  replyTo,
+  highlighted,
   currentUid,
   onReact,
+  onReplyPress,
   onImagePress,
   onAvatarPress,
   onLongPress,
@@ -62,7 +70,7 @@ export function MessageBubble({
       : {};
 
   return (
-    <View style={[styles.container, { opacity: isPending ? 0.4 : 1 }]}>
+    <View style={[styles.container, { opacity: isPending ? 0.4 : 1 }, highlighted && { backgroundColor: colors.primary + '15' }]}>
       <TouchableOpacity style={styles.avatarCol} onPress={onAvatarPress} activeOpacity={0.7}>
         <Avatar uri={senderPhotoURL} size={32} isBot={isBot} />
       </TouchableOpacity>
@@ -73,6 +81,21 @@ export function MessageBubble({
             {senderName}
           </Text>
         </TouchableOpacity>
+
+        {replyTo && (
+          <TouchableOpacity
+            onPress={() => onReplyPress?.(replyTo)}
+            activeOpacity={0.7}
+            style={[styles.quoteBox, { borderLeftColor: colors.primary, backgroundColor: colors.inputBackground }]}
+          >
+            <Text style={[styles.quoteName, { color: colors.primary }]} numberOfLines={1}>
+              {replyTo.senderName}
+            </Text>
+            <Text style={[styles.quoteText, { color: colors.textSecondary }]} numberOfLines={2}>
+              {replyTo.text || '📷 Photo'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {imageUrl && (
           <TouchableOpacity
@@ -122,7 +145,7 @@ export function MessageBubble({
 
         {timestamp ? (
           <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
-            {timestamp}
+            {timestamp}{edited ? ' • edited' : ''}
           </Text>
         ) : null}
       </View>
@@ -184,5 +207,19 @@ const styles = StyleSheet.create({
   reactionCount: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  quoteBox: {
+    borderLeftWidth: 3,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  quoteName: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  quoteText: {
+    fontSize: 13,
   },
 });

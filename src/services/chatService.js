@@ -502,7 +502,7 @@ export async function getUnreadCounts(uid, chats) {
   return counts;
 }
 
-export async function sendMessage(chatId, sender, text) {
+export async function sendMessage(chatId, sender, text, replyTo) {
   const trimmed = text.trim();
   if (!trimmed) return;
 
@@ -522,6 +522,7 @@ export async function sendMessage(chatId, sender, text) {
     senderUsername: senderUsername,
     senderPhotoURL: senderPhotoURL,
     status: 'sent',
+    replyTo: replyTo || null,
     createdAt: serverTimestamp(),
   });
 
@@ -731,6 +732,38 @@ export async function deleteMessage(chatId, messageId, uid) {
   if (cached.length > 0) {
     await cacheMessages(chatId, cached.filter((m) => m.id !== messageId));
   }
+  await refreshLastMessage(chatId);
+}
+
+export async function editMessage(chatId, messageId, uid, newText) {
+  const trimmed = (newText || '').trim();
+  if (!trimmed) throw new Error('Message cannot be empty');
+  const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
+  const snap = await getDoc(msgRef);
+  if (!snap.exists()) throw new Error('Message not found');
+  if (snap.data().senderId !== uid) throw new Error('You can only edit your own messages');
+  await updateDoc(msgRef, { text: trimmed.slice(0, 2000), edited: true });
+  await refreshLastMessage(chatId);
+}
+
+/**
+ * Recomputes a chat's list preview from its latest remaining message.
+ * Used after edits/deletes so the preview never points at stale content.
+ */
+export async function refreshLastMessage(chatId) {
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'desc'), limit(1))
+    );
+    const latest = snap.docs.length > 0 ? snap.docs[0].data() : null;
+    await updateDoc(doc(db, 'chats', chatId), {
+      lastMessage: latest ? (latest.text || (latest.imageUrl ? '📷 Photo' : '')) : '',
+      lastMessageSenderId: latest?.senderId || '',
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Preview refresh is best-effort
+  }
 }
 
 export async function deleteChat(chatId) {
@@ -763,7 +796,7 @@ export async function forwardMessage(targetChatId, sender, originalText, origina
   });
 }
 
-export async function sendImageMessage(chatId, sender, imageUrl) {
+export async function sendImageMessage(chatId, sender, imageUrl, replyTo) {
   const senderId = sender?.uid || 'user';
   const senderEmail = sender?.email || '';
   const senderUsername = sender?.username || sender?.displayName || senderEmail || 'User';
@@ -781,6 +814,7 @@ export async function sendImageMessage(chatId, sender, imageUrl) {
     senderUsername,
     senderPhotoURL,
     status: 'sent',
+    replyTo: replyTo || null,
     createdAt: serverTimestamp(),
   });
 

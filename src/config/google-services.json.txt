@@ -1,0 +1,5 @@
+Add your Firebase Android configuration file here.
+
+Download google-services.json from the Firebase Console for this app, then place it in this folder and name it exactly:
+
+google-services.json

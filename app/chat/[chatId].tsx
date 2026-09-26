@@ -41,6 +41,8 @@ import {
   subscribeToUsersPresence,
   subscribeToChats,
   toggleMessageReaction,
+  editMessage,
+  deleteMessage,
   GLOBAL_CHAT_ID,
 } from '../../src/services/chatService';
 import { uploadToCloudinary } from '../../src/services/cloudinaryService';
@@ -64,6 +66,10 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [reactTarget, setReactTarget] = useState<any>(null);
+  const [editingMessage, setEditingMessage] = useState<any>(null);
+  const [replyingTo, setReplyingTo] = useState<any>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [presence, setPresence] = useState<Record<string, any>>({});
@@ -152,6 +158,19 @@ export default function ChatScreen() {
       }
     };
   }, [chatId, user]);
+
+  useEffect(() => {
+    setEditingMessage(null);
+    setReactTarget(null);
+    setReplyingTo(null);
+    setHighlightId(null);
+  }, [chatId]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -290,6 +309,7 @@ export default function ChatScreen() {
       photoURL: user.photoURL || '',
     };
 
+    const replyRef = buildReplyRef();
     const tempId = `pending_${Date.now()}_${Math.random()}`;
     const pendingMsg = {
       id: tempId,
@@ -298,15 +318,17 @@ export default function ChatScreen() {
       senderUsername: activeProfile.username,
       senderPhotoURL: activeProfile.photoURL,
       status: 'pending',
+      replyTo: replyRef,
       createdAt: null,
       sentAt: Date.now(),
     };
     setPendingMessages((prev) => [...prev, pendingMsg]);
+    setReplyingTo(null);
     wasAtBottom.current = true;
 
     setSending(true);
     try {
-      await sendMessage(chatId, activeProfile, msgText);
+      await sendMessage(chatId, activeProfile, msgText, replyRef);
     } catch (e: any) {
       setPendingMessages((prev) => prev.filter((p) => p.id !== tempId));
       Alert.alert('Error', 'Failed to send message');
@@ -330,7 +352,8 @@ export default function ChatScreen() {
     setSending(true);
     try {
       const url = await uploadToCloudinary(result.assets[0].uri);
-      await sendImageMessage(chatId, userProfile, url);
+      await sendImageMessage(chatId, userProfile, url, buildReplyRef());
+      setReplyingTo(null);
     } catch (e: any) {
       Alert.alert('Error', 'Failed to send image');
     } finally {
@@ -348,6 +371,61 @@ export default function ChatScreen() {
       console.warn('[Chat] reaction failed:', e?.message);
       Alert.alert('Error', e?.message || 'Could not add reaction');
     }
+  };
+
+  const buildReplyRef = () => {
+    if (!replyingTo) return null;
+    return {
+      id: replyingTo.id,
+      text: replyingTo.text || '',
+      senderId: replyingTo.senderId,
+      senderName: getLiveUsername(replyingTo.senderId, replyingTo.senderUsername) || 'User',
+    };
+  };
+
+  const startReply = () => {
+    if (!reactTarget) return;
+    setReplyingTo(reactTarget);
+    setReactTarget(null);
+  };
+
+  const jumpToMessage = (messageId: string) => {
+    const index = filteredMessages.findIndex((m: any) => m.id === messageId);
+    if (index < 0) return;
+    try {
+      flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    } catch {}
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    setHighlightId(messageId);
+    highlightTimer.current = setTimeout(() => setHighlightId(null), 1500);
+  };
+
+  const startEdit = () => {
+    if (!reactTarget) return;
+    setEditingMessage(reactTarget);
+    setText(reactTarget.text || '');
+    setReactTarget(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingMessage || !text.trim() || !user) return;
+    try {
+      await editMessage(chatId, editingMessage.id, user.uid, text);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not edit message');
+      return;
+    }
+    setEditingMessage(null);
+    setText('');
+  };
+
+  const handleDeleteMessage = () => {
+    const target = reactTarget;
+    if (!target || !user) return;
+    confirm('Delete Message', 'Delete this message for everyone?', async () => {
+      await deleteMessage(chatId, target.id, user.uid);
+      setReactTarget(null);
+    }, { confirmText: 'Delete', destructive: true });
   };
 
   const handleCopyMessage = async () => {
@@ -579,8 +657,20 @@ export default function ChatScreen() {
         isGroup={isGroup || isGlobal}
         imageUrl={item.imageUrl}
         reactions={item.reactions}
+        edited={item.edited}
+        replyTo={
+          item.replyTo
+            ? {
+                id: item.replyTo.id,
+                text: item.replyTo.text || '',
+                senderName: getLiveUsername(item.replyTo.senderId, item.replyTo.senderName) || 'User',
+              }
+            : null
+        }
+        highlighted={highlightId === item.id}
         currentUid={user?.uid}
         onReact={(emoji) => handleReact(item.id, emoji)}
+        onReplyPress={(reply) => jumpToMessage(reply.id)}
         onImagePress={(uri) => setImageViewerUri(uri)}
         onAvatarPress={handleAvatarPress}
         onLongPress={isPending ? undefined : () => setReactTarget(item)}
@@ -718,6 +808,11 @@ export default function ChatScreen() {
               const isAtBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 50;
               wasAtBottom.current = isAtBottom;
             }}
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+              }, 500);
+            }}
             onContentSizeChange={() => {
               if (wasAtBottom.current) {
                 setTimeout(() => {
@@ -769,11 +864,45 @@ export default function ChatScreen() {
           </View>
         )}
 
+        {/* Reply preview */}
+        {replyingTo && (
+          <View style={[styles.editBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+            <MaterialIcons name="reply" size={18} color={colors.primary} />
+            <View style={styles.editBarTextWrap}>
+              <Text style={[styles.editBarLabel, { color: colors.primary }]}>
+                {getLiveUsername(replyingTo.senderId, replyingTo.senderUsername) || 'User'}
+              </Text>
+              <Text style={[styles.editBarText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {replyingTo.text || '📷 Photo'}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setReplyingTo(null)}>
+              <MaterialIcons name="close" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Editing banner */}
+        {editingMessage && (
+          <View style={[styles.editBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+            <MaterialIcons name="edit" size={18} color={colors.primary} />
+            <View style={styles.editBarTextWrap}>
+              <Text style={[styles.editBarLabel, { color: colors.primary }]}>Editing message</Text>
+              <Text style={[styles.editBarText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {editingMessage.text}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => { setEditingMessage(null); setText(''); }}>
+              <MaterialIcons name="close" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Message Input */}
         <MessageInput
           value={text}
           onChangeText={handleTextChange}
-          onSend={handleSend}
+          onSend={editingMessage ? handleSaveEdit : handleSend}
           onImagePick={handleImageSend}
           sending={sending}
         />
@@ -850,6 +979,31 @@ export default function ChatScreen() {
                   );
                 })}
               </View>
+              <TouchableOpacity
+                style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                onPress={startReply}
+              >
+                <MaterialIcons name="reply" size={22} color={colors.textSecondary} />
+                <Text style={[styles.menuItemText, { color: colors.text }]}>Reply</Text>
+              </TouchableOpacity>
+              {reactTarget?.senderId === user?.uid && reactTarget?.text ? (
+                <TouchableOpacity
+                  style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                  onPress={startEdit}
+                >
+                  <MaterialIcons name="edit" size={22} color={colors.textSecondary} />
+                  <Text style={[styles.menuItemText, { color: colors.text }]}>Edit</Text>
+                </TouchableOpacity>
+              ) : null}
+              {reactTarget?.senderId === user?.uid ? (
+                <TouchableOpacity
+                  style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                  onPress={handleDeleteMessage}
+                >
+                  <MaterialIcons name="delete" size={22} color={colors.danger} />
+                  <Text style={[styles.menuItemText, { color: colors.danger }]}>Delete</Text>
+                </TouchableOpacity>
+              ) : null}
               {reactTarget?.text ? (
                 <TouchableOpacity
                   style={[styles.menuItem, { borderBottomColor: colors.border }]}
@@ -1217,6 +1371,24 @@ const styles = StyleSheet.create({
   mentionChipText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  editBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  editBarTextWrap: {
+    flex: 1,
+  },
+  editBarLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  editBarText: {
+    fontSize: 14,
   },
   menuOverlay: {
     flex: 1,

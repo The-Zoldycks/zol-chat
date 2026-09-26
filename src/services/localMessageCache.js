@@ -25,6 +25,7 @@ export async function cacheMessages(chatId, messages) {
         senderUsername: m.senderUsername || '',
         status: m.status || 'sent',
         reactions: m.reactions || {},
+        replyTo: m.replyTo || null,
         forwarded: m.forwarded || false,
         senderProfile: m.senderProfile || null,
         createdAt: ts || Date.now(),
