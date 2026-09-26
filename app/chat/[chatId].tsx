@@ -13,7 +13,9 @@ import {
   Dimensions,
   TextInput,
   Keyboard,
+  Animated,
 } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
@@ -89,6 +91,26 @@ export default function ChatScreen() {
 
   const flatListRef = useRef<FlatList>(null);
   const wasAtBottom = useRef<boolean>(true);
+  const swipeableRefs = useRef(new Map<string, any>());
+
+  const closeOtherSwipeables = (exceptId: string) => {
+    swipeableRefs.current.forEach((ref: any, id: string) => {
+      if (id !== exceptId) ref?.close?.();
+    });
+  };
+
+  const renderReplyAction = (_progress: any, dragX: any) => {
+    const scale = dragX.interpolate({
+      inputRange: [0, 80],
+      outputRange: [0.5, 1],
+      extrapolate: 'clamp',
+    });
+    return (
+      <Animated.View style={[styles.swipeAction, { transform: [{ scale }] }]}>
+        <MaterialIcons name="reply" size={24} color={colors.primary} />
+      </Animated.View>
+    );
+  };
 
   const isGlobal = chatId === GLOBAL_CHAT_ID;
   const isZolbot = chatId?.startsWith('zolbot__') || (chatData?.participantMeta as any)?.zolbot?.isBot === true;
@@ -362,11 +384,14 @@ export default function ChatScreen() {
   };
 
   const handleReact = async (messageId: string, emoji: string) => {
+    console.log('[Chat] react tapped:', messageId, emoji, 'user:', user?.uid || 'none');
     setReactTarget(null);
     if (!user) return;
     try {
       await toggleMessageReaction(chatId, messageId, user.uid, emoji);
       console.log('[Chat] reaction saved:', messageId, emoji);
+      // TEMPORARY diagnostic - remove once confirmed working
+      Alert.alert('Debug: reaction saved', `${emoji} written. Chips should appear via live update.`);
     } catch (e: any) {
       console.warn('[Chat] reaction failed:', e?.message);
       Alert.alert('Error', e?.message || 'Could not add reaction');
@@ -401,6 +426,7 @@ export default function ChatScreen() {
   };
 
   const startEdit = () => {
+    console.log('[Chat] edit tapped, target:', reactTarget?.id || 'none');
     if (!reactTarget) return;
     setEditingMessage(reactTarget);
     setText(reactTarget.text || '');
@@ -408,10 +434,13 @@ export default function ChatScreen() {
   };
 
   const handleSaveEdit = async () => {
+    console.log('[Chat] save edit, editing:', editingMessage?.id || 'none');
     if (!editingMessage || !text.trim() || !user) return;
     try {
       await editMessage(chatId, editingMessage.id, user.uid, text);
+      console.log('[Chat] edit saved:', editingMessage.id);
     } catch (e: any) {
+      console.warn('[Chat] edit failed:', e?.message);
       Alert.alert('Error', e?.message || 'Could not edit message');
       return;
     }
@@ -646,6 +675,25 @@ export default function ChatScreen() {
     };
 
     return (
+      <Swipeable
+        ref={(r) => {
+          if (r) swipeableRefs.current.set(item.id, r);
+          else swipeableRefs.current.delete(item.id);
+        }}
+        enabled={!isPending}
+        renderLeftActions={renderReplyAction}
+        onSwipeableWillOpen={() => closeOtherSwipeables(item.id)}
+        onSwipeableOpen={(direction) => {
+          if (direction === 'left') {
+            setReplyingTo(item);
+            swipeableRefs.current.get(item.id)?.close?.();
+          }
+        }}
+        overshootLeft={false}
+        friction={2}
+        leftThreshold={40}
+        failOffsetY={[-10, 10]}
+      >
       <MessageBubble
         text={item.text || ''}
         senderName={getLiveUsername(item.senderId, item.senderUsername) || 'User'}
@@ -675,6 +723,7 @@ export default function ChatScreen() {
         onAvatarPress={handleAvatarPress}
         onLongPress={isPending ? undefined : () => setReactTarget(item)}
       />
+      </Swipeable>
     );
   };
 
@@ -909,12 +958,13 @@ export default function ChatScreen() {
 
         {/* Options Menu Modal */}
         <Modal visible={menuVisible} transparent animationType="slide">
-          <TouchableOpacity
-            style={styles.profileSheetOverlay}
-            activeOpacity={1}
-            onPress={() => setMenuVisible(false)}
-          >
-            <View style={[styles.menuSheet, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+          <View style={styles.sheetContainer}>
+            <TouchableOpacity
+              style={styles.sheetBackdrop}
+              activeOpacity={1}
+              onPress={() => setMenuVisible(false)}
+            />
+            <View style={[styles.menuSheet, { backgroundColor: colors.surface }]}>
               <View style={[styles.profileSheetHandle, { backgroundColor: colors.text }]} />
 
               {!isGlobal && (
@@ -953,17 +1003,18 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               )}
             </View>
-          </TouchableOpacity>
+          </View>
         </Modal>
 
         {/* Message Actions Modal */}
         <Modal visible={!!reactTarget} transparent animationType="slide">
-          <TouchableOpacity
-            style={styles.profileSheetOverlay}
-            activeOpacity={1}
-            onPress={() => setReactTarget(null)}
-          >
-            <View style={[styles.menuSheet, { backgroundColor: colors.surface }]} onStartShouldSetResponder={() => true}>
+          <View style={styles.sheetContainer}>
+            <TouchableOpacity
+              style={styles.sheetBackdrop}
+              activeOpacity={1}
+              onPress={() => setReactTarget(null)}
+            />
+            <View style={[styles.menuSheet, { backgroundColor: colors.surface }]}>
               <View style={[styles.profileSheetHandle, { backgroundColor: colors.text }]} />
               <View style={styles.quickReactRow}>
                 {QUICK_REACTIONS.map((emoji) => {
@@ -1014,16 +1065,17 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-          </TouchableOpacity>
+          </View>
         </Modal>
 
         {/* Profile Sheet Modal */}
         <Modal visible={profileSheetVisible} transparent animationType="slide">
-          <TouchableOpacity
-            style={styles.profileSheetOverlay}
-            activeOpacity={1}
-            onPress={() => { setProfileSheetVisible(false); setProfileSheetUser(null); }}
-          >
+          <View style={styles.sheetContainer}>
+            <TouchableOpacity
+              style={styles.sheetBackdrop}
+              activeOpacity={1}
+              onPress={() => { setProfileSheetVisible(false); setProfileSheetUser(null); }}
+            />
             <View style={[styles.profileSheet, { backgroundColor: colors.surface }]}>
               <View style={[styles.profileSheetHandle, { backgroundColor: colors.textTertiary }]} />
 
@@ -1157,18 +1209,19 @@ export default function ChatScreen() {
                 )}
               </View>
             </View>
-          </TouchableOpacity>
+          </View>
         </Modal>
 
         {/* Add Members Modal */}
         <Modal visible={addMemberVisible} transparent animationType="slide">
-          <TouchableOpacity
-            style={styles.profileSheetOverlay}
-            activeOpacity={1}
-            onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}
-          >
+          <View style={styles.sheetContainer}>
+            <TouchableOpacity
+              style={styles.sheetBackdrop}
+              activeOpacity={1}
+              onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}
+            />
             <SafeAreaView edges={['top']} style={{ flex: 1, justifyContent: 'flex-end' }}>
-              <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+              <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Add Members</Text>
                 <TouchableOpacity onPress={() => { setAddMemberVisible(false); setMemberSearch(''); }}>
@@ -1227,9 +1280,9 @@ export default function ChatScreen() {
                   />
                 );
               })()}
-            </TouchableOpacity>
+              </View>
             </SafeAreaView>
-          </TouchableOpacity>
+          </View>
         </Modal>
 
         {/* Image Viewer Modal */}
@@ -1428,9 +1481,17 @@ const styles = StyleSheet.create({
   quickReactEmoji: {
     fontSize: 26,
   },
-  profileSheetOverlay: {
+  swipeAction: {
+    width: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetContainer: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
   profileSheet: {
     borderTopLeftRadius: 20,

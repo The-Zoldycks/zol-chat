@@ -603,11 +603,12 @@ export default function ChatsScreen() {
 
       {/* Profile Sheet */}
       <Modal visible={!!profileSheetChat} transparent animationType="slide">
-        <TouchableOpacity
-          style={styles.profileSheetOverlay}
-          activeOpacity={1}
-          onPress={() => setProfileSheetChat(null)}
-        >
+        <View style={styles.sheetContainer}>
+          <TouchableOpacity
+            style={styles.sheetBackdrop}
+            activeOpacity={1}
+            onPress={() => setProfileSheetChat(null)}
+          />
           <View style={[styles.profileSheet, { backgroundColor: colors.surface }]}>
             <View style={[styles.profileSheetHandle, { backgroundColor: colors.textTertiary }]} />
             <View style={styles.profileSheetContent}>
@@ -652,7 +653,7 @@ export default function ChatsScreen() {
               })()}
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -830,9 +831,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  profileSheetOverlay: {
+  sheetContainer: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
   profileSheet: {
     borderTopLeftRadius: 24,

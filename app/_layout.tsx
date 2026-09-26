@@ -1,11 +1,16 @@
 import '../global.css';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { ThemeProvider, useThemeContext } from '../src/contexts/ThemeContext';
 import { registerForPushNotifications, setupNotificationListeners } from '../src/services/notificationService';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+
+if (Platform.OS === 'web' && typeof document !== 'undefined') {
+  document.title = 'ZolChat';
+}
 
 function RootLayoutNav() {
   const { user, loading } = useAuth();
@@ -62,10 +67,12 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <RootLayoutNav />
-      </AuthProvider>
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <AuthProvider>
+          <RootLayoutNav />
+        </AuthProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
