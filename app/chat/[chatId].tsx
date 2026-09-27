@@ -14,6 +14,7 @@ import {
   TextInput,
   Keyboard,
   Animated,
+  useWindowDimensions,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,6 +28,8 @@ import { useUserProfiles } from '../../src/hooks/useUserProfiles';
 import { Avatar } from '../../components/Avatar';
 import { MessageBubble } from '../../components/MessageBubble';
 import { MessageInput } from '../../components/MessageInput';
+import { ChatListItem } from '../../components/ChatListItem';
+import { SearchBar } from '../../components/SearchBar';
 import {
   subscribeToMessages,
   subscribeToPresence,
@@ -55,12 +58,23 @@ import * as Clipboard from 'expo-clipboard';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
+const MEMBER_COLORS = ['#E879F9', '#38BDF8', '#FB923C', '#4ADE80', '#F472B6', '#A78BFA', '#FACC15', '#2DD4BF', '#FB7185', '#60A5FA', '#C084FC', '#A3E635'];
+
+function getMemberColor(memberId: string) {
+  let hash = 0;
+  for (let i = 0; i < memberId.length; i += 1) {
+    hash = (hash * 31 + memberId.charCodeAt(i)) | 0;
+  }
+  return MEMBER_COLORS[Math.abs(hash) % MEMBER_COLORS.length];
+}
 
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
   const { user, userProfile } = useAuth();
   const colors = useThemeColors();
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const desktop = Platform.OS === 'web' && width >= 900;
 
   const [messages, setMessages] = useState<any[]>([]);
   const [pendingMessages, setPendingMessages] = useState<any[]>([]);
@@ -84,6 +98,7 @@ export default function ChatScreen() {
   const [memberSearch, setMemberSearch] = useState('');
   const [memberSearchResults, setMemberSearchResults] = useState<any[]>([]);
   const [allChats, setAllChats] = useState<any[]>([]);
+  const [chatListSearch, setChatListSearch] = useState('');
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [otherUserOnline, setOtherUserOnline] = useState(false);
   const [profileSheetUser, setProfileSheetUser] = useState<any>(null);
@@ -618,9 +633,43 @@ export default function ChatScreen() {
         if (uid !== 'zolbot') ids.add(uid);
       });
     }
+    allChats.forEach((chat) => {
+      Object.keys(chat.participantMeta || {}).forEach((uid) => {
+        if (uid !== 'zolbot' && uid !== user?.uid) ids.add(uid);
+      });
+    });
     return [...ids];
-  }, [filteredMessages, chatData]);
+  }, [filteredMessages, chatData, allChats, user]);
   const liveProfiles = useUserProfiles(senderIds);
+
+  const getListChatName = (chat: any) => {
+    if (chat.isGlobal || chat.id === GLOBAL_CHAT_ID) return 'Global Chat';
+    if (chat.id?.startsWith('zolbot__')) return 'Zolbot';
+    if (chat.groupName) return chat.groupName;
+    const other = Object.entries(chat.participantMeta || {}).find(([uid]) => uid !== user?.uid && uid !== 'zolbot');
+    if (other) return liveProfiles[other[0]]?.username || (other[1] as any)?.username || 'User';
+    return 'Chat';
+  };
+
+  const getListChatAvatar = (chat: any) => {
+    if (chat.isGroup && chat.groupImage) return chat.groupImage;
+    const other = Object.entries(chat.participantMeta || {}).find(([uid]) => uid !== user?.uid && uid !== 'zolbot');
+    return other ? liveProfiles[other[0]]?.photoURL || (other[1] as any)?.photoURL || null : null;
+  };
+
+  const getListLastMessage = (chat: any) => {
+    const senderId = chat.lastMessageSenderId;
+    const prefix = senderId === user?.uid
+      ? 'You'
+      : senderId && (chat.isGroup || chat.isGlobal)
+        ? liveProfiles[senderId]?.username || chat.participantMeta?.[senderId]?.username || 'User'
+        : '';
+    return prefix ? `${prefix}: ${chat.lastMessage || ''}` : chat.lastMessage || '';
+  };
+
+  const visibleChats = allChats.filter((chat) =>
+    getListChatName(chat).toLowerCase().includes(chatListSearch.trim().toLowerCase())
+  );
 
   const renderMessage = ({ item, index }: { item: any; index: number }) => {
     const isOwn = item.senderId === user?.uid;
@@ -704,6 +753,7 @@ export default function ChatScreen() {
         isBot={isBotMsg}
         isPending={isPending}
         isGroup={isGroup || isGlobal}
+        senderColor={isBotMsg ? colors.primary : getMemberColor(item.senderId || item.senderUsername || 'user')}
         imageUrl={item.imageUrl}
         reactions={item.reactions}
         edited={item.edited}
@@ -719,6 +769,7 @@ export default function ChatScreen() {
         highlighted={highlightId === item.id}
         currentUid={user?.uid}
         onReact={(emoji) => handleReact(item.id, emoji)}
+        onPress={isPending ? undefined : () => setReactTarget(item)}
         onReplyPress={(reply) => jumpToMessage(reply.id)}
         onImagePress={(uri) => setImageViewerUri(uri)}
         onAvatarPress={handleAvatarPress}
@@ -756,8 +807,85 @@ export default function ChatScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <View style={[styles.chatWorkspace, desktop && styles.desktopWorkspace]}>
+        {desktop && (
+          <View style={[styles.primaryTabsPane, { backgroundColor: colors.surface, borderRightColor: colors.border }]}>
+            <View style={styles.chatListPaneBrand}>
+              <View style={[styles.chatListPaneBrandMark, { backgroundColor: colors.primary }]}>
+                <MaterialIcons name="forum" size={20} color="#FFFFFF" />
+              </View>
+              <Text style={[styles.chatListPaneBrandName, { color: colors.text }]}>ZolChat</Text>
+            </View>
+            <Text style={[styles.primaryTabsLabel, { color: colors.textTertiary }]}>WORKSPACE</Text>
+            {([
+              { title: 'Chats', icon: 'chat-bubble-outline', route: '/(tabs)' },
+              { title: 'Search', icon: 'search', route: '/(tabs)/search' },
+              { title: 'Profile', icon: 'person-outline', route: '/(tabs)/profile' },
+            ] as const).map((tab) => (
+              <TouchableOpacity
+                key={tab.title}
+                style={[styles.primaryTabItem, tab.title === 'Chats' && { backgroundColor: colors.primary + '18' }]}
+                onPress={() => router.replace(tab.route)}
+                activeOpacity={0.7}
+              >
+                <MaterialIcons name={tab.icon} size={21} color={tab.title === 'Chats' ? colors.primary : colors.textTertiary} />
+                <Text style={[styles.primaryTabText, { color: tab.title === 'Chats' ? colors.primary : colors.textSecondary }, tab.title === 'Chats' && styles.primaryTabTextActive]}>
+                  {tab.title}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+        {desktop && (
+          <View style={[styles.chatListPane, { backgroundColor: colors.background, borderRightColor: colors.border }]}>
+            <View style={styles.chatListPaneHeader}>
+              <Text style={[styles.chatListPaneTitle, { color: colors.text }]}>Chats</Text>
+            </View>
+            <View style={styles.chatListPaneSearch}>
+              <SearchBar value={chatListSearch} onChangeText={setChatListSearch} placeholder="Search conversations" />
+            </View>
+            <FlatList
+              data={visibleChats}
+              keyExtractor={(item) => item.id}
+              style={styles.chatListPaneItems}
+              contentContainerStyle={styles.chatListPaneContent}
+              renderItem={({ item }) => (
+                <ChatListItem
+                  name={getListChatName(item)}
+                  lastMessage={getListLastMessage(item)}
+                  timestamp={formatTime(item.updatedAt)}
+                  avatarUri={getListChatAvatar(item)}
+                  isBot={item.id?.startsWith('zolbot__')}
+                  isGlobal={item.isGlobal || item.id === GLOBAL_CHAT_ID}
+                  isGroup={item.isGroup}
+                  groupImage={item.groupImage}
+                  active={item.id === chatId}
+                  onAvatarPress={() => {
+                    if (item.isGlobal || item.isGroup || item.id?.startsWith('zolbot__')) return;
+                    const other = Object.entries(item.participantMeta || {}).find(([uid]) => uid !== user?.uid && uid !== 'zolbot');
+                    if (!other) return;
+                    const [uid, meta] = other as [string, any];
+                    setProfileSheetUser({
+                      uid,
+                      ...meta,
+                      username: liveProfiles[uid]?.username || meta.username || 'User',
+                      photoURL: liveProfiles[uid]?.photoURL || meta.photoURL || null,
+                    });
+                    setProfileSheetVisible(true);
+                  }}
+                  onPress={() => {
+                    if (item.id !== chatId) router.replace(`/chat/${item.id}`);
+                  }}
+                />
+              )}
+              ListEmptyComponent={(
+                <Text style={[styles.chatListPaneEmpty, { color: colors.textTertiary }]}>No conversations found</Text>
+              )}
+            />
+          </View>
+        )}
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={[styles.flex, desktop && styles.desktopChatPane]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
@@ -767,9 +895,11 @@ export default function ChatScreen() {
           onPress={() => setProfileSheetVisible(true)}
         >
           <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-              <MaterialIcons name="arrow-back" size={24} color={colors.text} />
-            </TouchableOpacity>
+            {!desktop && (
+              <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+                <MaterialIcons name="arrow-back" size={24} color={colors.text} />
+              </TouchableOpacity>
+            )}
 
             <View style={styles.headerInfo}>
               {isGlobal ? (
@@ -1309,6 +1439,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </Modal>
       </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -1316,6 +1447,94 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  chatWorkspace: {
+    flex: 1,
+  },
+  desktopWorkspace: {
+    flexDirection: 'row',
+    minWidth: 0,
+  },
+  primaryTabsPane: {
+    width: 248,
+    paddingHorizontal: 18,
+    paddingTop: 24,
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
+  chatListPaneBrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 8,
+    marginBottom: 42,
+  },
+  chatListPaneBrandMark: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatListPaneBrandName: {
+    fontSize: 19,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+  },
+  primaryTabsLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginHorizontal: 12,
+    marginBottom: 12,
+  },
+  primaryTabItem: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 13,
+    gap: 13,
+    marginBottom: 6,
+  },
+  primaryTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  primaryTabTextActive: {
+    fontWeight: '700',
+  },
+  chatListPane: {
+    width: 320,
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
+  chatListPaneHeader: {
+    paddingHorizontal: 24,
+    paddingTop: 22,
+    paddingBottom: 16,
+  },
+  chatListPaneTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  chatListPaneSearch: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  chatListPaneItems: {
+    flex: 1,
+  },
+  chatListPaneContent: {
+    paddingTop: 4,
+    paddingBottom: 24,
+  },
+  chatListPaneEmpty: {
+    textAlign: 'center',
+    padding: 24,
+    fontSize: 14,
+  },
+  desktopChatPane: {
+    minWidth: 0,
   },
   flex: {
     flex: 1,

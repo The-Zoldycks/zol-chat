@@ -12,6 +12,8 @@ interface MessageBubbleProps {
   isBot?: boolean;
   isPending?: boolean;
   isGroup?: boolean;
+  senderColor?: string;
+  hideAvatar?: boolean;
   imageUrl?: string;
   reactions?: Record<string, string>;
   edited?: boolean;
@@ -21,6 +23,7 @@ interface MessageBubbleProps {
   onReact?: (emoji: string) => void;
   onReplyPress?: (replyTo: { id: string; text: string; senderName: string }) => void;
   onImagePress?: (uri: string) => void;
+  onPress?: () => void;
   onAvatarPress?: () => void;
   onLongPress?: () => void;
 }
@@ -35,6 +38,8 @@ export function MessageBubble({
   isBot,
   isPending,
   isGroup,
+  senderColor,
+  hideAvatar,
   imageUrl,
   reactions,
   edited,
@@ -44,6 +49,7 @@ export function MessageBubble({
   onReact,
   onReplyPress,
   onImagePress,
+  onPress,
   onAvatarPress,
   onLongPress,
 }: MessageBubbleProps) {
@@ -72,17 +78,17 @@ export function MessageBubble({
       : {};
 
   return (
-    <View style={[styles.container, { opacity: isPending ? 0.4 : 1, justifyContent: isOwn ? 'flex-end' : 'flex-start' }, highlighted && { backgroundColor: colors.primary + '15' }]}>
-      {!isOwn && (
+    <View style={[styles.container, { opacity: isPending ? 0.4 : 1 }, highlighted && { backgroundColor: colors.primary + '15' }]}>
+      {!hideAvatar && (
         <TouchableOpacity style={styles.avatarCol} onPress={onAvatarPress} activeOpacity={0.7}>
           <Avatar uri={senderPhotoURL} size={32} isBot={isBot} />
         </TouchableOpacity>
       )}
 
-      <View style={[styles.contentCol, { backgroundColor: isOwn ? colors.primary + '18' : colors.surfaceVariant, borderColor: isOwn ? colors.primary + '24' : colors.border, borderTopLeftRadius: isOwn ? 16 : 5, borderTopRightRadius: isOwn ? 5 : 16 }]}>
+      <View style={styles.contentCol}>
         {showSenderName && (
           <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.7}>
-            <Text style={[styles.senderName, { color: isBot ? colors.primary : colors.primaryLight }]}>
+            <Text style={[styles.senderName, { color: senderColor || (isBot ? colors.primary : colors.primaryLight) }]}>
               {senderName}
             </Text>
           </TouchableOpacity>
@@ -121,6 +127,7 @@ export function MessageBubble({
         {text ? (
           <Text
             style={[styles.messageText, { color: colors.text }]}
+            onPress={onPress}
             onLongPress={onLongPress}
             {...webContextMenuProps}
           >
@@ -162,22 +169,19 @@ export function MessageBubble({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     paddingHorizontal: Platform.OS === 'web' ? 28 : 16,
-    paddingVertical: 5,
+    paddingVertical: 8,
   },
   avatarCol: {
     marginRight: 10,
     marginTop: 2,
   },
   contentCol: {
-    maxWidth: '88%',
+    maxWidth: '100%',
     flexShrink: 1,
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderTopLeftRadius: 5,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   senderName: {
     fontSize: 12,
@@ -197,7 +201,7 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 11,
     marginTop: 5,
-    alignSelf: 'flex-end',
+    alignSelf: 'flex-start',
   },
   reactionRow: {
     flexDirection: 'row',

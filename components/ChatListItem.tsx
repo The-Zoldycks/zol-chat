@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Avatar } from './Avatar';
 import { useThemeColors } from '../src/hooks/useTheme';
@@ -14,8 +14,8 @@ interface ChatListItemProps {
   isGroup?: boolean;
   isOnline?: boolean;
   groupImage?: string;
+  active?: boolean;
   onPress: () => void;
-  onNamePress?: () => void;
   onAvatarPress?: () => void;
 }
 
@@ -30,17 +30,15 @@ export function ChatListItem({
   isGroup,
   isOnline,
   groupImage,
+  active = false,
   onPress,
-  onNamePress,
   onAvatarPress,
 }: ChatListItemProps) {
   const colors = useThemeColors();
 
   return (
-    <TouchableOpacity
-      style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.border }]}
-      onPress={onPress}
-      activeOpacity={0.7}
+    <View
+      style={[styles.container, { backgroundColor: active ? colors.primary + '14' : colors.surface, borderColor: active ? colors.primary : colors.border }]}
     >
       <TouchableOpacity
         style={styles.avatarWrapper}
@@ -65,25 +63,14 @@ export function ChatListItem({
         )}
       </TouchableOpacity>
 
-      <View style={styles.content}>
+      <Pressable style={styles.content} onPress={onPress}>
         <View style={styles.topRow}>
-          {onNamePress ? (
-            <TouchableOpacity onPress={onNamePress} activeOpacity={0.6}>
-              <Text
-                style={[styles.name, { color: colors.text }]}
-                numberOfLines={1}
-              >
-                {name}
-              </Text>
-            </TouchableOpacity>
-          ) : (
-            <Text
-              style={[styles.name, { color: colors.text }]}
-              numberOfLines={1}
-            >
-              {name}
-            </Text>
-          )}
+          <Text
+            style={[styles.name, { color: colors.text }]}
+            numberOfLines={1}
+          >
+            {name}
+          </Text>
           {timestamp && (
             <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
               {timestamp}
@@ -105,8 +92,8 @@ export function ChatListItem({
             </View>
           )}
         </View>
-      </View>
-    </TouchableOpacity>
+      </Pressable>
+    </View>
   );
 }
 

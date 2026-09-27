@@ -373,7 +373,6 @@ export default function ChatsScreen() {
               return otherUid ? onlineUsers[otherUid]?.online === true : false;
             })()}
             onPress={() => router.push(`/chat/${item.id}`)}
-            onNamePress={() => setProfileSheetChat(item)}
             onAvatarPress={() => {
               if (item.isGlobal || item.isGroup || item.id?.startsWith('zolbot__')) {
                 setProfileSheetChat(item);
