@@ -11,7 +11,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  transaction,
+  runTransaction,
   updateDoc,
   where,
   writeBatch,
@@ -447,7 +447,7 @@ export async function markChatAsRead(chatId, uid) {
 
 export async function toggleMessageReaction(chatId, messageId, uid, emoji) {
   const msgRef = doc(db, 'chats', chatId, 'messages', messageId);
-  await transaction(db, async (txn) => {
+  await runTransaction(db, async (txn) => {
     const snap = await txn.get(msgRef);
     if (!snap.exists()) return;
 

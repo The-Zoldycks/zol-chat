@@ -1,3 +1,17 @@
+html,
+body,
+#root {
+  background-color: #f8fafc;
+}
+
+@media (prefers-color-scheme: dark) {
+  html,
+  body,
+  #root {
+    background-color: #121212;
+  }
+}
+
 input:focus,
 textarea:focus,
 [contenteditable="true"]:focus {

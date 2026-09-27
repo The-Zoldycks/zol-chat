@@ -1,5 +1,3 @@
-import { useColorScheme } from 'react-native';
-
 const lightColors = {
   primary: '#2563EB',
   primaryLight: '#3B82F6',
@@ -33,24 +31,24 @@ const darkColors = {
   primary: '#3B82F6',
   primaryLight: '#60A5FA',
   primaryDark: '#2563EB',
-  background: '#0F172A',
-  surface: '#1E293B',
-  surfaceVariant: '#334155',
-  text: '#F1F5F9',
-  textSecondary: '#94A3B8',
-  textTertiary: '#64748B',
-  border: '#334155',
-  borderLight: '#1E293B',
-  inputBackground: '#1E293B',
+  background: '#121212',
+  surface: '#1E1E1E',
+  surfaceVariant: '#292929',
+  text: '#F5F5F5',
+  textSecondary: '#B3B3B3',
+  textTertiary: '#858585',
+  border: '#333333',
+  borderLight: '#292929',
+  inputBackground: '#292929',
   error: '#F87171',
   success: '#4ADE80',
   online: '#4ADE80',
   unread: '#3B82F6',
-  mention: '#1E3A5F',
+  mention: '#18345A',
   mentionText: '#60A5FA',
-  tabBar: '#1E293B',
-  tabBarBorder: '#334155',
-  headerBackground: '#1E293B',
+  tabBar: '#1E1E1E',
+  tabBarBorder: '#333333',
+  headerBackground: '#1E1E1E',
   overlay: 'rgba(0,0,0,0.7)',
   fab: '#3B82F6',
   fabText: '#FFFFFF',
@@ -62,9 +60,4 @@ export type ThemeColors = typeof lightColors;
 
 export function getColors(isDark: boolean): ThemeColors {
   return isDark ? darkColors : lightColors;
-}
-
-export function useThemeColors(): ThemeColors {
-  const scheme = useColorScheme();
-  return getColors(scheme === 'dark');
 }

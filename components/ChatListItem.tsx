@@ -38,7 +38,7 @@ export function ChatListItem({
 
   return (
     <TouchableOpacity
-      style={[styles.container, { borderBottomColor: colors.border }]}
+      style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.border }]}
       onPress={onPress}
       activeOpacity={0.7}
     >
@@ -61,7 +61,7 @@ export function ChatListItem({
           <Avatar uri={avatarUri} size={52} isBot={isBot} />
         )}
         {isOnline && (
-          <View style={[styles.onlineDot, { backgroundColor: colors.online }]} />
+          <View style={[styles.onlineDot, { backgroundColor: colors.online, borderColor: colors.surface }]} />
         )}
       </TouchableOpacity>
 
@@ -114,9 +114,13 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    marginHorizontal: 20,
+    marginVertical: 4,
+    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.06)',
   },
   avatarWrapper: {
     position: 'relative',
@@ -149,8 +153,8 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   name: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     flex: 1,
   },
   timestamp: {
@@ -163,7 +167,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lastMessage: {
-    fontSize: 14,
+    fontSize: 13,
     flex: 1,
   },
   badge: {

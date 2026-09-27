@@ -390,8 +390,6 @@ export default function ChatScreen() {
     try {
       await toggleMessageReaction(chatId, messageId, user.uid, emoji);
       console.log('[Chat] reaction saved:', messageId, emoji);
-      // TEMPORARY diagnostic - remove once confirmed working
-      Alert.alert('Debug: reaction saved', `${emoji} written. Chips should appear via live update.`);
     } catch (e: any) {
       console.warn('[Chat] reaction failed:', e?.message);
       Alert.alert('Error', e?.message || 'Could not add reaction');
@@ -624,10 +622,12 @@ export default function ChatScreen() {
   }, [filteredMessages, chatData]);
   const liveProfiles = useUserProfiles(senderIds);
 
-  const renderMessage = ({ item }: { item: any }) => {
+  const renderMessage = ({ item, index }: { item: any; index: number }) => {
     const isOwn = item.senderId === user?.uid;
     const isBotMsg = item.senderId === 'zolbot';
     const isPending = item.status === 'pending';
+    const previousMessage = index > 0 ? filteredMessages[index - 1] : null;
+    const showSenderName = !previousMessage || previousMessage.senderId !== item.senderId;
 
     const handleAvatarPress = async () => {
       if (!item.senderId) return;
@@ -697,6 +697,7 @@ export default function ChatScreen() {
       <MessageBubble
         text={item.text || ''}
         senderName={getLiveUsername(item.senderId, item.senderUsername) || 'User'}
+        showSenderName={showSenderName}
         senderPhotoURL={getProfileImageForSender(item.senderId, item.senderPhotoURL)}
         timestamp={isPending ? '' : formatTime(item.createdAt)}
         isOwn={isOwn}
@@ -754,7 +755,7 @@ export default function ChatScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.surface }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -844,7 +845,7 @@ export default function ChatScreen() {
         )}
 
         {/* Messages */}
-        <View style={styles.messagesContainer}>
+        <View style={[styles.messagesContainer, { backgroundColor: colors.background }]}>
           <FlatList
             ref={flatListRef}
             data={filteredMessages}
@@ -1322,10 +1323,11 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 4,
+    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.04)',
   },
   backBtn: {
     padding: 8,
@@ -1373,7 +1375,8 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,
     height: 36,
     gap: 6,
@@ -1395,8 +1398,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messagesList: {
-    paddingVertical: 8,
+    paddingVertical: 14,
     flexGrow: 1,
+    width: '100%',
+    maxWidth: 1000,
+    alignSelf: 'center',
   },
   emptyChat: {
     flex: 1,

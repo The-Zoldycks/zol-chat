@@ -67,8 +67,8 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: Platform.OS === 'web' ? 20 : 8,
-    paddingVertical: 8,
+    paddingHorizontal: Platform.OS === 'web' ? 20 : 12,
+    paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   imageBtn: {
@@ -76,13 +76,13 @@ const styles = StyleSheet.create({
   },
   inputWrapper: {
     flex: 1,
-    borderRadius: 8,
+    borderRadius: 18,
     borderWidth: 1,
     marginHorizontal: 8,
     justifyContent: 'center',
   },
   input: {
-    borderRadius: 8,
+    borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 6,
     fontSize: 16,
@@ -93,9 +93,9 @@ const styles = StyleSheet.create({
     outlineStyle: 'none' as any,
   },
   sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },

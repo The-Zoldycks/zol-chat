@@ -13,7 +13,7 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search...', styl
   const colors = useThemeColors();
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.inputBackground }, style]}>
+    <View style={[styles.container, { backgroundColor: colors.inputBackground, borderColor: colors.border }, style]}>
       <View style={styles.iconSlot}>
         <MaterialIcons name="search" size={20} color={colors.textTertiary} />
       </View>
@@ -43,7 +43,8 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,
     height: 44,
     gap: 8,

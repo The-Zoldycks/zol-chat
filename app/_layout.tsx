@@ -19,6 +19,17 @@ function RootLayoutNav() {
   const { isDark } = useThemeContext();
 
   useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const backgroundColor = isDark ? '#121212' : '#F8FAFC';
+    document.documentElement.style.backgroundColor = backgroundColor;
+    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+    document.body.style.backgroundColor = backgroundColor;
+    document.body.style.colorScheme = isDark ? 'dark' : 'light';
+    const root = document.getElementById('root');
+    if (root) root.style.backgroundColor = backgroundColor;
+  }, [isDark]);
+
+  useEffect(() => {
     if (!user) return;
     registerForPushNotifications(user.uid).catch(() => {});
     const cleanup = setupNotificationListeners(undefined, (data: any) => {

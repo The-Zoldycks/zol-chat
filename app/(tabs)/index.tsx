@@ -12,6 +12,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -41,6 +42,9 @@ export default function ChatsScreen() {
   const { user, userProfile } = useAuth();
   const colors = useThemeColors();
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const desktop = width >= 900;
+  const fabRight = desktop ? Math.max(28, (width - 248 - 860) / 2 + 20) : 20;
 
   const [chats, setChats] = useState<any[]>([]);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
@@ -331,23 +335,29 @@ export default function ChatsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={styles.headerSection}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
-      </View>
+      <View style={styles.contentColumn}>
+        <View style={styles.headerSection}>
+          <View>
+            <Text style={[styles.eyebrow, { color: colors.primary }]}>YOUR INBOX</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
+          </View>
+        </View>
 
-      <View style={styles.searchContainer}>
-        <SearchBar
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Search chats..."
-        />
-      </View>
+        <View style={styles.searchContainer}>
+          <SearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search conversations"
+          />
+        </View>
 
-      <FlatList
-        data={filteredChats}
-        keyExtractor={(item) => item.id || Math.random().toString()}
-        renderItem={({ item }) => (
-          <ChatListItem
+        <FlatList
+          style={styles.chatList}
+          contentContainerStyle={styles.chatListContent}
+          data={filteredChats}
+          keyExtractor={(item) => item.id || Math.random().toString()}
+          renderItem={({ item }) => (
+            <ChatListItem
             name={getChatDisplayName(item)}
             lastMessage={getLastMessagePreview(item)}
             timestamp={formatTimestamp(item.updatedAt)}
@@ -371,24 +381,27 @@ export default function ChatsScreen() {
                 setProfileSheetChat(item);
               }
             }}
-          />
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <MaterialIcons name="chat-bubble-outline" size={48} color={colors.textTertiary} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              No chats yet. Start a conversation!
-            </Text>
-          </View>
-        }
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
-        }
-      />
+            />
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceVariant }]}>
+                <MaterialIcons name="chat-bubble-outline" size={28} color={colors.primary} />
+              </View>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                No conversations yet. Start a chat to see it here.
+              </Text>
+            </View>
+          }
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          }
+        />
+      </View>
 
       {/* FAB */}
       <TouchableOpacity
-        style={[styles.fab, { backgroundColor: colors.fab }]}
+        style={[styles.fab, { backgroundColor: colors.fab, right: fabRight }]}
         onPress={() => setFabOpen(!fabOpen)}
         activeOpacity={0.8}
       >
@@ -397,7 +410,7 @@ export default function ChatsScreen() {
 
       {/* FAB Menu */}
       {fabOpen && (
-        <View style={styles.fabMenu}>
+        <View style={[styles.fabMenu, { right: fabRight }]}>
           <TouchableOpacity
             style={[styles.fabMenuItem, { backgroundColor: colors.surface }]}
             onPress={() => {
@@ -663,27 +676,59 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  contentColumn: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 860,
+    alignSelf: 'center',
+  },
   headerSection: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: 24,
+    paddingTop: 22,
+    paddingBottom: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 28,
+  eyebrow: {
+    fontSize: 10,
     fontWeight: '800',
+    letterSpacing: 1.4,
+    marginBottom: 4,
+  },
+  headerTitle: {
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.7,
   },
   searchContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  chatList: {
+    flex: 1,
+  },
+  chatListContent: {
+    paddingTop: 4,
+    paddingBottom: 100,
   },
   emptyContainer: {
     alignItems: 'center',
-    paddingTop: 80,
-    gap: 12,
+    paddingTop: 90,
+    paddingHorizontal: 28,
+    gap: 14,
+  },
+  emptyIcon: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyText: {
     fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   fab: {
     position: 'absolute',

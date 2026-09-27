@@ -5,6 +5,7 @@ import { Avatar } from './Avatar';
 interface MessageBubbleProps {
   text: string;
   senderName: string;
+  showSenderName?: boolean;
   senderPhotoURL?: string;
   timestamp?: string;
   isOwn: boolean;
@@ -27,6 +28,7 @@ interface MessageBubbleProps {
 export function MessageBubble({
   text,
   senderName,
+  showSenderName = true,
   senderPhotoURL,
   timestamp,
   isOwn,
@@ -70,17 +72,21 @@ export function MessageBubble({
       : {};
 
   return (
-    <View style={[styles.container, { opacity: isPending ? 0.4 : 1 }, highlighted && { backgroundColor: colors.primary + '15' }]}>
-      <TouchableOpacity style={styles.avatarCol} onPress={onAvatarPress} activeOpacity={0.7}>
-        <Avatar uri={senderPhotoURL} size={32} isBot={isBot} />
-      </TouchableOpacity>
-
-      <View style={styles.contentCol}>
-        <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.7}>
-          <Text style={[styles.senderName, { color: isBot ? colors.primary : colors.primaryLight }]}>
-            {senderName}
-          </Text>
+    <View style={[styles.container, { opacity: isPending ? 0.4 : 1, justifyContent: isOwn ? 'flex-end' : 'flex-start' }, highlighted && { backgroundColor: colors.primary + '15' }]}>
+      {!isOwn && (
+        <TouchableOpacity style={styles.avatarCol} onPress={onAvatarPress} activeOpacity={0.7}>
+          <Avatar uri={senderPhotoURL} size={32} isBot={isBot} />
         </TouchableOpacity>
+      )}
+
+      <View style={[styles.contentCol, { backgroundColor: isOwn ? colors.primary + '18' : colors.surfaceVariant, borderColor: isOwn ? colors.primary + '24' : colors.border, borderTopLeftRadius: isOwn ? 16 : 5, borderTopRightRadius: isOwn ? 5 : 16 }]}>
+        {showSenderName && (
+          <TouchableOpacity onPress={onAvatarPress} activeOpacity={0.7}>
+            <Text style={[styles.senderName, { color: isBot ? colors.primary : colors.primaryLight }]}>
+              {senderName}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {replyTo && (
           <TouchableOpacity
@@ -156,24 +162,31 @@ export function MessageBubble({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
+    alignItems: 'flex-end',
     paddingHorizontal: Platform.OS === 'web' ? 28 : 16,
-    paddingVertical: 3,
+    paddingVertical: 5,
   },
   avatarCol: {
     marginRight: 10,
     marginTop: 2,
   },
   contentCol: {
-    flex: 1,
+    maxWidth: '88%',
+    flexShrink: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: 5,
   },
   senderName: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   messageText: {
     fontSize: 15,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   messageImage: {
     width: 220,
@@ -183,7 +196,8 @@ const styles = StyleSheet.create({
   },
   timestamp: {
     fontSize: 11,
-    marginTop: 2,
+    marginTop: 5,
+    alignSelf: 'flex-end',
   },
   reactionRow: {
     flexDirection: 'row',
