@@ -37,8 +37,18 @@ export default function SearchScreen() {
   useEffect(() => {
     if (!user) return;
     const unsub = subscribeToChats(user.uid, (chatList: any[]) => {
+      // Search is for people only — never show groups, global, or Zolbot
+      // chats here (groups used to leak in with a member's avatar).
       const recent = chatList
-        .filter((c) => !c.isGlobal && !c.id?.startsWith('zolbot__'))
+        .filter(
+          (c) =>
+            !c.isGlobal &&
+            !c.isGroup &&
+            !c.groupName &&
+            !c.id?.startsWith('zolbot__') &&
+            !c.id?.startsWith('group_') &&
+            c.id !== GLOBAL_CHAT_ID
+        )
         .slice(0, 10);
       setRecentChats(recent);
     });
@@ -69,7 +79,17 @@ export default function SearchScreen() {
     const timer = setTimeout(async () => {
       setSearching(true);
       const results = await findUsersByEmailOrUsername(searchQuery, user?.uid || '');
-      setSearchResults(results);
+      // Defensive: only real user docs (never group/global pseudo-entries).
+      setSearchResults(
+        (results || []).filter(
+          (r: any) =>
+            r?.uid &&
+            !String(r.uid).startsWith('group_') &&
+            r.uid !== GLOBAL_CHAT_ID &&
+            !(r as any).isGroup &&
+            !(r as any).groupName
+        )
+      );
       setSearching(false);
     }, 400);
     return () => clearTimeout(timer);
@@ -147,7 +167,15 @@ export default function SearchScreen() {
     },
   ];
 
-  const recentAsUsers = recentChats.map((chat) => {
+  const recentAsUsers = recentChats
+    .filter(
+      (chat: any) =>
+        !chat.isGlobal &&
+        !chat.isGroup &&
+        !(chat as any).groupName &&
+        !String(chat.id || '').startsWith('group_')
+    )
+    .map((chat) => {
     const meta = chat.participantMeta || {};
     const entries = Object.entries(meta);
     const other = entries.find(([key]) => key !== user?.uid) as [string, any] | undefined;

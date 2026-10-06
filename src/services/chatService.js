@@ -40,23 +40,30 @@ export async function ensureGlobalChatExists() {
   }
 }
 
+let lastGlobalPurgeAt = 0;
+
 export async function purgeOldGlobalMessages() {
-  const cutoff = Date.now() - 72 * 60 * 60 * 1000;
-  const msgsRef = collection(db, 'chats', GLOBAL_CHAT_ID, 'messages');
+  // Throttle: at most once every 5 minutes. This used to fetch EVERY global
+  // message on EVERY snapshot, which made global chat progressively slower.
+  const now = Date.now();
+  if (now - lastGlobalPurgeAt < 5 * 60 * 1000) return;
+  lastGlobalPurgeAt = now;
+  const cutoff = now - 72 * 60 * 60 * 1000;
   try {
-    const snap = await getDocs(msgsRef);
-    const deletePromises = [];
+    // Only inspect the oldest messages instead of downloading the whole room.
+    const snap = await getDocs(
+      query(collection(db, 'chats', GLOBAL_CHAT_ID, 'messages'), orderBy('createdAt', 'asc'), limit(100))
+    );
+    const batch = writeBatch(db);
+    let ops = 0;
     snap.forEach((msgSnap) => {
-      const data = msgSnap.data();
-      let ts = 0;
-      if (data.createdAt?.toDate) ts = data.createdAt.toDate().getTime();
-      else if (data.createdAt?.seconds) ts = data.createdAt.seconds * 1000;
-      else if (data.createdAt) ts = new Date(data.createdAt).getTime();
+      const ts = getTimestampMs(msgSnap.data().createdAt);
       if (ts && ts < cutoff) {
-        deletePromises.push(deleteDoc(doc(db, 'chats', GLOBAL_CHAT_ID, 'messages', msgSnap.id)));
+        batch.delete(doc(db, 'chats', GLOBAL_CHAT_ID, 'messages', msgSnap.id));
+        ops++;
       }
     });
-    await Promise.all(deletePromises);
+    if (ops > 0) await batch.commit();
   } catch {
     // Purge fails silently if offline or rules block
   }
@@ -411,13 +418,24 @@ export function subscribeToMessages(chatId, onData) {
     if (!snapshotReceived && cached.length > 0) onData(cached);
   });
 
-  const messageQuery = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'));
+  // Bound the query so large rooms (especially global) stay fast: fetch the
+  // most recent N messages (desc + limit) then flip to ascending for display.
+  // Unbounded orderBy('createdAt','asc') downloads the entire history on
+  // every snapshot, which is what made global chat slow.
+  const messageLimit = chatId === GLOBAL_CHAT_ID ? 150 : 300;
+  const messageQuery = query(
+    collection(db, 'chats', chatId, 'messages'),
+    orderBy('createdAt', 'desc'),
+    limit(messageLimit)
+  );
   return onSnapshot(messageQuery, (snapshot) => {
     snapshotReceived = true;
     let docs = snapshot.docs.map((messageDoc) => ({
       id: messageDoc.id,
       ...messageDoc.data({ serverTimestamps: 'estimate' }),
     }));
+    // Query was desc for speed; restore chronological order.
+    docs.reverse();
     if (chatId === GLOBAL_CHAT_ID) {
       const cutoff = Date.now() - 72 * 60 * 60 * 1000;
       docs = docs.filter((msg) => {
@@ -464,33 +482,70 @@ export async function toggleMessageReaction(chatId, messageId, uid, emoji) {
   });
 }
 
+function toMs(ts) {
+  if (!ts) return 0;
+  try {
+    if (typeof ts.toDate === 'function') {
+      const d = ts.toDate();
+      const ms = d instanceof Date ? d.getTime() : new Date(d).getTime();
+      return Number.isFinite(ms) ? ms : 0;
+    }
+    if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+    if (typeof ts === 'number') return ts;
+    const ms = new Date(ts).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function getUnreadCounts(uid, chats) {
   const counts = {};
   await Promise.all(
     chats.map(async (chat) => {
       try {
-        const lastRead = chat.participantMeta?.[uid]?.lastRead;
+        // No messages yet -> never unread (also skips a Firestore read).
+        if (!chat.lastMessage) {
+          counts[chat.id] = 0;
+          return;
+        }
+        const lastReadMs = toMs(chat.participantMeta?.[uid]?.lastRead);
+        // Global room has no membership (participants = []), so a fresh user
+        // has no lastRead — counting the whole room as unread is misleading.
+        // Show 0 until they've opened it at least once (which writes lastRead).
+        if ((chat.isGlobal || chat.id === GLOBAL_CHAT_ID) && !lastReadMs) {
+          counts[chat.id] = 0;
+          return;
+        }
+        // Fast path: chat preview already older than last read -> nothing new.
+        // Saves a Firestore read per chat and avoids stale-snapshot races where
+        // updatedAt hasn't caught up yet.
+        const updatedMs = toMs(chat.updatedAt);
+        if (lastReadMs && updatedMs && updatedMs <= lastReadMs) {
+          counts[chat.id] = 0;
+          return;
+        }
+        // If the latest message is our own and nothing newer exists, unread is 0.
+        if (chat.lastMessageSenderId === uid && lastReadMs && updatedMs && updatedMs <= lastReadMs + 1000) {
+          counts[chat.id] = 0;
+          return;
+        }
         const messagesSnap = await getDocs(
           query(
             collection(db, 'chats', chat.id, 'messages'),
             orderBy('createdAt', 'desc'),
-            limit(50),
+            limit(100),
           )
         );
         let count = 0;
-        if (!lastRead) {
+        if (!lastReadMs) {
           messagesSnap.forEach((docSnap) => {
-            const data = docSnap.data();
-            if (data.senderId !== uid) count++;
+            if (docSnap.data().senderId !== uid) count++;
           });
         } else {
-          const lastReadDate = lastRead?.toDate ? lastRead.toDate() : new Date(lastRead);
           messagesSnap.forEach((docSnap) => {
             const data = docSnap.data();
-            if (data.senderId !== uid) {
-              const msgDate = data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt?.seconds * 1000 || 0);
-              if (msgDate > lastReadDate) count++;
-            }
+            if (data.senderId !== uid && toMs(data.createdAt) > lastReadMs) count++;
           });
         }
         counts[chat.id] = count;
@@ -515,7 +570,7 @@ export async function sendMessage(chatId, sender, text, replyTo) {
     await ensureZolbotChat(chatId, senderId, senderEmail, senderUsername, sender?.photoURL);
   }
 
-  await addDoc(collection(db, 'chats', chatId, 'messages'), {
+  const messagePayload = {
     text: trimmed,
     senderId: senderId,
     senderEmail: senderEmail,
@@ -524,23 +579,49 @@ export async function sendMessage(chatId, sender, text, replyTo) {
     status: 'sent',
     replyTo: replyTo || null,
     createdAt: serverTimestamp(),
-  });
-
-  await updateDoc(doc(db, 'chats', chatId), {
+  };
+  const chatPreviewUpdate = {
     lastMessage: trimmed,
     lastMessageSenderId: senderId,
     updatedAt: serverTimestamp(),
-  });
+  };
+
+  // Write message + preview in parallel so sends feel instant. The preview
+  // update is best-effort (global chat may not exist yet for a fresh user).
+  await addDoc(collection(db, 'chats', chatId, 'messages'), messagePayload);
+  updateDoc(doc(db, 'chats', chatId), chatPreviewUpdate).catch(() => {});
+
+  // Fire-and-forget push to other participants (never blocks the send).
+  try {
+    const { notifyChatParticipants } = await import('./notificationService');
+    notifyChatParticipants(chatId, { uid: senderId, username: senderUsername }, trimmed).catch(() => {});
+  } catch {}
+
+  if (senderId === 'zolbot') return;
 
   if (chatId.startsWith('zolbot__')) {
-    respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername });
-  } else if (chatId.startsWith('group_')) {
-    const mentionRegex = /@zolbot\b/i;
-    if (mentionRegex.test(trimmed)) {
-      const chatSnap = await getDoc(doc(db, 'chats', chatId));
-      if (chatSnap.exists() && chatSnap.data()?.participants?.includes('zolbot')) {
-        respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername });
-      }
+    // Don't await: bot reply arrives via snapshot while the user's message
+    // is already on screen.
+    respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername }).catch(() => {});
+    return;
+  }
+
+  // Zolbot answers whenever it is tagged in a group or the global room —
+  // no membership gate. Previously the bot only replied if 'zolbot' was in
+  // participants, but there was no way to add it, so tags never worked.
+  if (/@zolbot\b/i.test(trimmed)) {
+    const isGroupLike = chatId === GLOBAL_CHAT_ID || chatId.startsWith('group_');
+    if (isGroupLike) {
+      respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername }).catch(() => {});
+    } else {
+      // Fallback for groups whose id doesn't use the group_ prefix:
+      // check the chat doc once (cached path, fire-and-forget).
+      getDoc(doc(db, 'chats', chatId)).then((snap) => {
+        const data = snap.exists() ? snap.data() : null;
+        if (data?.isGroup || data?.isGlobal) {
+          respondWithBot(chatId, { uid: senderId, email: senderEmail, username: senderUsername }).catch(() => {});
+        }
+      }).catch(() => {});
     }
   }
 }
@@ -818,11 +899,16 @@ export async function sendImageMessage(chatId, sender, imageUrl, replyTo) {
     createdAt: serverTimestamp(),
   });
 
-  await updateDoc(doc(db, 'chats', chatId), {
+  updateDoc(doc(db, 'chats', chatId), {
     lastMessage: '📷 Photo',
     lastMessageSenderId: senderId,
     updatedAt: serverTimestamp(),
-  });
+  }).catch(() => {});
+
+  try {
+    const { notifyChatParticipants } = await import('./notificationService');
+    notifyChatParticipants(chatId, { uid: senderId, username: senderUsername }, '📷 Photo').catch(() => {});
+  } catch {}
 }
 
 export function setTyping(chatId, uid, isTyping) {

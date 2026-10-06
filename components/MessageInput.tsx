@@ -37,6 +37,13 @@ export function MessageInput({
           placeholderTextColor={colors.textTertiary}
           multiline
           maxLength={2000}
+          returnKeyType="send"
+          blurOnSubmit={false}
+          underlineColorAndroid="transparent"
+          submitBehavior="submitAndContinue"
+          onSubmitEditing={() => {
+            if (value.trim().length > 0 && !sending) onSend();
+          }}
           // Web renders multiline inputs as <textarea>, which defaults to
           // 2 rows (a phantom second line). Pin it to 1; it still grows.
           {...(Platform.OS === 'web' ? ({ rows: 1 } as any) : {})}

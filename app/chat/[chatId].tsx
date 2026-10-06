@@ -17,7 +17,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -75,6 +75,7 @@ export default function ChatScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const desktop = Platform.OS === 'web' && width >= 900;
+  const insets = useSafeAreaInsets();
 
   const [messages, setMessages] = useState<any[]>([]);
   const [pendingMessages, setPendingMessages] = useState<any[]>([]);
@@ -142,6 +143,43 @@ export default function ChatScreen() {
     return unsub;
   }, [chatId]);
 
+  // Tell the notification layer which chat is open so incoming messages
+  // there don't fire banners/pushes while the user is reading them.
+  useEffect(() => {
+    let mounted = true;
+    import('../../src/services/notificationService').then((mod) => {
+      if (mounted) mod.setActiveChatId(chatId || null);
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+      import('../../src/services/notificationService').then((mod) => {
+        if (mod.getActiveChatId() === chatId) mod.setActiveChatId(null);
+      }).catch(() => {});
+    };
+  }, [chatId]);
+
+  const markReadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastMarkedAt = useRef<number>(0);
+
+  const markReadDebounced = (immediate = false) => {
+    if (!chatId || !user) return;
+    // Coalesce rapid snapshots into one write: unread used to flicker because
+    // every incoming message fired its own markChatAsRead, racing the
+    // unread-count fetch in the chat list.
+    if (immediate) {
+      lastMarkedAt.current = Date.now();
+      markChatAsRead(chatId, user.uid).catch(() => {});
+      return;
+    }
+    if (markReadTimer.current) clearTimeout(markReadTimer.current);
+    markReadTimer.current = setTimeout(() => {
+      // Skip if we marked very recently (e.g. mount + first snapshot).
+      if (Date.now() - lastMarkedAt.current < 2000) return;
+      lastMarkedAt.current = Date.now();
+      markChatAsRead(chatId, user.uid).catch(() => {});
+    }, 800);
+  };
+
   useEffect(() => {
     if (!chatId || !user) return;
 
@@ -170,7 +208,7 @@ export default function ChatScreen() {
       // Messages arriving while viewing should not stay "unread" in the list.
       const latest = msgs[msgs.length - 1];
       if (latest && latest.senderId !== user?.uid) {
-        markChatAsRead(chatId, user.uid).catch(() => {});
+        markReadDebounced(false);
       }
     });
 
@@ -178,11 +216,12 @@ export default function ChatScreen() {
       setPresence(p);
     });
 
-    markChatAsRead(chatId, user.uid).catch(() => {});
+    markReadDebounced(true);
 
     return () => {
       unsubMessages();
       unsubPresence();
+      if (markReadTimer.current) clearTimeout(markReadTimer.current);
       clearPresence(chatId, user.uid).catch(() => {});
     };
   }, [chatId, user]);
@@ -886,8 +925,12 @@ export default function ChatScreen() {
         )}
       <KeyboardAvoidingView
         style={[styles.flex, desktop && styles.desktopChatPane]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
+        // iOS needs padding to lift above the keyboard; Android relies on
+        // softwareKeyboardLayoutMode="resize" (see app.json) — using
+        // behavior="height" there double-shifts the input on some devices
+        // (Samsung/Xiaomi/gesture-nav) and hides the text bar.
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         {/* Header */}
         <TouchableOpacity
@@ -982,6 +1025,11 @@ export default function ChatScreen() {
             keyExtractor={(item) => item.id || Math.random().toString()}
             renderItem={renderMessage}
             contentContainerStyle={styles.messagesList}
+            initialNumToRender={25}
+            maxToRenderPerBatch={20}
+            windowSize={11}
+            removeClippedSubviews={Platform.OS !== 'web'}
+            keyboardShouldPersistTaps="handled"
             onScrollBeginDrag={() => { wasAtBottom.current = false; Keyboard.dismiss(); }}
             onScrollEndDrag={(e) => {
               const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
@@ -1078,14 +1126,18 @@ export default function ChatScreen() {
           </View>
         )}
 
-        {/* Message Input */}
-        <MessageInput
-          value={text}
-          onChangeText={handleTextChange}
-          onSend={editingMessage ? handleSaveEdit : handleSend}
-          onImagePick={handleImageSend}
-          sending={sending}
-        />
+        {/* Message Input — bottom safe-area padding keeps the bar above the
+            home indicator when the keyboard is hidden, without double-shifting
+            it when the keyboard is open (KAV handles that). */}
+        <View style={{ paddingBottom: Platform.OS === 'ios' ? insets.bottom : 0 }}>
+          <MessageInput
+            value={text}
+            onChangeText={handleTextChange}
+            onSend={editingMessage ? handleSaveEdit : handleSend}
+            onImagePick={handleImageSend}
+            sending={sending}
+          />
+        </View>
 
         {/* Options Menu Modal */}
         <Modal visible={menuVisible} transparent animationType="slide">

@@ -1,6 +1,7 @@
 import { View, Text, Image, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useThemeColors } from '../src/hooks/useTheme';
 import { Avatar } from './Avatar';
+import { MentionText } from './MentionText';
 
 interface MessageBubbleProps {
   text: string;
@@ -103,9 +104,11 @@ export function MessageBubble({
             <Text style={[styles.quoteName, { color: colors.primary }]} numberOfLines={1}>
               {replyTo.senderName}
             </Text>
-            <Text style={[styles.quoteText, { color: colors.textSecondary }]} numberOfLines={2}>
-              {replyTo.text || '📷 Photo'}
-            </Text>
+            <MentionText
+              text={replyTo.text || '📷 Photo'}
+              style={[styles.quoteText, { color: colors.textSecondary }] as any}
+              numberOfLines={2}
+            />
           </TouchableOpacity>
         )}
 
@@ -125,14 +128,14 @@ export function MessageBubble({
         )}
 
         {text ? (
-          <Text
-            style={[styles.messageText, { color: colors.text }]}
-            onPress={onPress}
-            onLongPress={onLongPress}
-            {...webContextMenuProps}
-          >
-            {text}
-          </Text>
+          <View {...webContextMenuProps}>
+            <MentionText
+              text={text}
+              style={[styles.messageText, { color: colors.text }] as any}
+              onPress={onPress}
+              onLongPress={onLongPress}
+            />
+          </View>
         ) : null}
 
         {reactionEntries.length > 0 && (
